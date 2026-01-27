@@ -1,12 +1,251 @@
-import React from "react";
-import { Text, View } from "react-native";
+import { FontAwesome } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
+import { useRouter } from "expo-router";
+import { useState } from "react";
+import {
+  ActivityIndicator,
+  ImageBackground,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { useAuthStore } from "../../stores/authStore";
 
-const login = () => {
+export default function LoginScreen() {
+  const router = useRouter();
+  const { signIn } = useAuthStore();
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleLogin = async () => {
+    // Validation
+    if (!email.trim() || !password.trim()) {
+      setError("Please fill in all fields");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
+    const { error: signInError } = await signIn(email, password);
+
+    setLoading(false);
+
+    if (signInError) {
+      setError(signInError.message || "Invalid email or password");
+    } else {
+      // Navigation is handled automatically by root layout
+      setEmail("");
+      setPassword("");
+    }
+  };
+
   return (
-    <View>
-      <Text>login</Text>
-    </View>
-  );
-};
+    <ImageBackground
+      source={require("../../assets/images/partyBg.png")}
+      style={styles.background}
+      resizeMode="cover"
+    >
+      {/* Gradient Overlays */}
+      <LinearGradient
+        colors={[
+          "rgba(25, 16, 34, 0.3)",
+          "rgba(25, 16, 34, 0.6)",
+          "rgba(25, 16, 34, 1)",
+        ]}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <LinearGradient
+        colors={["transparent", "rgba(25, 16, 34, 0.9)", "rgba(25, 16, 34, 1)"]}
+        style={[StyleSheet.absoluteFillObject, { top: "25%" }]}
+      />
 
-export default login;
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={{ flex: 1 }}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Back Button */}
+          <TouchableOpacity
+            className="absolute top-12 left-6 z-10"
+            onPress={() => router.back()}
+          >
+            <View className="w-10 h-10 rounded-full bg-white/10 items-center justify-center border border-white/20">
+              <Text className="text-white text-xl">←</Text>
+            </View>
+          </TouchableOpacity>
+
+          {/* Content Area */}
+          <View className="flex-1 justify-end px-6 pb-8 pt-24">
+            {/* Title Section */}
+            <View className="my-8">
+              <Text className="text-white text-left tracking-tight text-[35px] font-extrabold leading-tight mb-3">
+                Welcome Back To{"\n"}
+                <Text className="text-purple-500">TheScene</Text>
+              </Text>
+              <Text className="text-gray-300 text-left text-base font-medium leading-relaxed">
+                Log in to discover tonight's parties
+              </Text>
+            </View>
+
+            {/* Error Message */}
+            {error ? (
+              <View className="bg-red-500/20 border border-red-500/50 rounded-xl p-4 mb-4">
+                <Text className="text-red-300 text-sm font-medium">
+                  {error}
+                </Text>
+              </View>
+            ) : null}
+
+            {/* Input Fields */}
+            <View className="gap-4 mb-4">
+              {/* Email Input */}
+              <View>
+                <Text className="text-gray-400 text-sm font-medium mb-2 ml-1">
+                  Email
+                </Text>
+                <TextInput
+                  className="bg-white/10 border border-white/20 rounded-xl h-14 px-5 text-white text-base"
+                  placeholder="your@email.com"
+                  placeholderTextColor="#888"
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+
+              {/* Password Input */}
+              <View>
+                <Text className="text-gray-400 text-sm font-medium mb-2 ml-1">
+                  Password
+                </Text>
+                <TextInput
+                  className="bg-white/10 border border-white/20 rounded-xl h-14 px-5 text-white text-base"
+                  placeholder="Enter your password"
+                  placeholderTextColor="#888"
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+            </View>
+
+            {/* Forgot Password */}
+            <TouchableOpacity className="items-end mb-6">
+              <Text className="text-purple-400 text-sm font-medium">
+                Forgot Password?
+              </Text>
+            </TouchableOpacity>
+
+            {/* Login Button */}
+            <TouchableOpacity
+              className="items-center justify-center rounded-xl h-14 px-5 bg-purple-600 mb-6"
+              style={styles.primaryButton}
+              activeOpacity={0.9}
+              onPress={handleLogin}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text className="text-white text-lg font-bold">Log In</Text>
+              )}
+            </TouchableOpacity>
+
+            {/* Sign Up Link */}
+            <View className="items-center mb-4">
+              <Text className="text-gray-400 text-sm">
+                Don't have an account?{" "}
+                <Text
+                  className="text-white font-semibold underline"
+                  onPress={() => router.push("/(auth)/signup")}
+                >
+                  Sign Up
+                </Text>
+              </Text>
+            </View>
+
+            {/* Divider */}
+            <View className="flex-row items-center w-full py-6">
+              <View className="flex-1 h-[1px] bg-white/10" />
+              <Text className="mx-4 text-gray-500 text-sm font-medium">
+                Or continue with
+              </Text>
+              <View className="flex-1 h-[1px] bg-white/10" />
+            </View>
+
+            {/* Social Login Buttons */}
+            <View className="w-full gap-3 mb-6">
+              {/* Google Button */}
+              <TouchableOpacity
+                className="py-4 flex flex-row justify-center items-center rounded-xl bg-white/10 border border-white/10 px-5"
+                activeOpacity={0.8}
+              >
+                <FontAwesome name="google" size={24} color="white" />
+                <Text className="text-white text-base font-bold ml-2">
+                  Continue with Google
+                </Text>
+              </TouchableOpacity>
+
+              {/* Apple Button */}
+              <TouchableOpacity
+                className="flex-row items-center justify-center rounded-xl bg-white py-4 px-5"
+                activeOpacity={0.8}
+              >
+                <FontAwesome name="apple" size={24} color="#aaa" />
+                <Text className="text-black text-base font-bold ml-2">
+                  Continue with Apple
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Footer */}
+            <View className="items-center">
+              <Text className="text-gray-500 text-xs text-center px-4">
+                By continuing, you agree to our{" "}
+                <Text className="text-gray-300 underline">
+                  Terms of Service
+                </Text>{" "}
+                and{" "}
+                <Text className="text-gray-300 underline">Privacy Policy</Text>.
+              </Text>
+            </View>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </ImageBackground>
+  );
+}
+
+const styles = StyleSheet.create({
+  background: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    minHeight: "100%",
+  },
+  primaryButton: {
+    shadowColor: "#8c25f4",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+});

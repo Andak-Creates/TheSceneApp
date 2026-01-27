@@ -16,7 +16,7 @@ interface AuthState {
     username: string
   ) => Promise<{ error: any }>;
   signIn: (email: string, password: string) => Promise<{ error: any }>;
-  signOut: () => Promise<void>;
+  signOut: () => Promise<{ error: any }>;
   setSession: (session: Session | null) => void;
 }
 
@@ -55,27 +55,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   signUp: async (email: string, password: string, username: string) => {
     try {
-      // Sign up user
+      // Sign up user with metadata
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
+        options: {
+          data: {
+            username: username.toLowerCase(),
+            full_name: username,
+          },
+        },
       });
 
       if (error) return { error };
       if (!data.user) return { error: new Error("No user returned") };
 
-      // Create profile
-      const { error: profileError } = await supabase.from("profiles").insert({
-        id: data.user.id,
-        username: username.toLowerCase(),
-        full_name: username,
-      });
-
-      if (profileError) {
-        console.error("Profile creation error:", profileError);
-        return { error: profileError };
-      }
-
+      // Profile is created automatically by the trigger!
       return { error: null };
     } catch (error) {
       return { error };
@@ -96,8 +91,21 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signOut: async () => {
-    await supabase.auth.signOut();
-    set({ session: null, user: null });
+    try {
+      const { error } = await supabase.auth.signOut();
+
+      if (error) {
+        console.error("Sign out error:", error);
+        return { error };
+      }
+
+      // Clear state
+      set({ session: null, user: null });
+      return { error: null };
+    } catch (error) {
+      console.error("Sign out error:", error);
+      return { error };
+    }
   },
 
   setSession: (session: Session | null) => {

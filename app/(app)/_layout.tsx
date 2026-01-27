@@ -1,45 +1,71 @@
+import { FontAwesome6 } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
-import { Text } from "react-native";
+import { View } from "react-native";
 
-// TODO: Replace with proper icons (lucide-react-native or expo-icons)
 export default function AppLayout() {
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: "#fff",
+          backgroundColor: "#191022",
           borderTopWidth: 1,
-          borderTopColor: "#e5e5e5",
+          borderTopColor: "rgba(255, 255, 255, 0.1)",
+          height: 70,
+          paddingBottom: 10,
+          paddingTop: 10,
         },
         tabBarActiveTintColor: "#8B5CF6",
         tabBarInactiveTintColor: "#666",
+        tabBarLabelStyle: {
+          fontSize: 12,
+          fontWeight: "600",
+        },
       }}
     >
       <Tabs.Screen
         name="feed"
         options={{
           title: "Feed",
-          tabBarIcon: ({ color }) => (
-            <Text style={{ fontSize: 24, color }}>🎉</Text>
+          tabBarIcon: ({ color, focused }) => (
+            <FontAwesome6 name="house" size={focused ? 24 : 22} color={color} />
           ),
         }}
       />
+
       <Tabs.Screen
-        name="create-party"
+        name="createParty"
         options={{
-          title: "Create",
-          tabBarIcon: ({ color }) => (
-            <Text style={{ fontSize: 24, color }}>➕</Text>
+          title: "",
+          tabBarIcon: () => (
+            <View
+              style={{
+                width: 60,
+                height: 60,
+                borderRadius: 30,
+                backgroundColor: "#8B5CF6",
+                alignItems: "center",
+                justifyContent: "center",
+                marginTop: -20,
+                shadowColor: "#8B5CF6",
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.3,
+                shadowRadius: 8,
+                elevation: 8,
+              }}
+            >
+              <FontAwesome6 name="plus" size={26} color="#fff" />
+            </View>
           ),
         }}
       />
+
       <Tabs.Screen
         name="profile"
         options={{
           title: "Profile",
-          tabBarIcon: ({ color }) => (
-            <Text style={{ fontSize: 24, color }}>👤</Text>
+          tabBarIcon: ({ color, focused }) => (
+            <FontAwesome6 name="user" size={focused ? 24 : 22} color={color} />
           ),
         }}
       />

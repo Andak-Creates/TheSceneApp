@@ -61,6 +61,10 @@ export default function SignUpScreen() {
     } else {
       // Navigate to onboarding
       router.replace("/(auth)/onboarding");
+      setUsername("");
+      setPassword("");
+      setConfirmPassword("");
+      setEmail("");
     }
   };
 
@@ -106,10 +110,10 @@ export default function SignUpScreen() {
           {/* Content Area */}
           <View className="flex-1 justify-end px-6 pb-8 pt-24">
             {/* Title Section */}
-            <View className="mb-8">
-              <Text className="text-white text-left tracking-tight text-[40px] font-extrabold leading-tight mb-3">
-                Create Your{"\n"}
-                <Text className="text-purple-500">Account</Text>
+            <View className="my-8">
+              <Text className="text-white text-left tracking-tight text-[35px] font-extrabold leading-tight mb-3">
+                Create An Account{"\n"}
+                On <Text className="text-purple-500">TheScene</Text>
               </Text>
               <Text className="text-gray-300 text-left text-base font-medium leading-relaxed">
                 Join the party and never miss a vibe!

@@ -43,9 +43,9 @@ export default function WelcomeScreen() {
           </View>
         </View>
 
-        <Text className="text-[40px] font-bold text-white">Where them</Text>
+        <Text className="text-[40px] font-bold text-white">Welcome To</Text>
         <Text className="text-purple-500 text-4xl font-bold mb-2">
-          PartiesAt?
+          TheScene
         </Text>
         <Text className="text-[#aaa] text-sm text-left mb-12">
           Discover the hottest parties, connect with friends, buy tickets

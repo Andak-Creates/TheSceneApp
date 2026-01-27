@@ -33,9 +33,19 @@ export const useUserStore = create<UserState>((set, get) => ({
         .from("profiles")
         .select("*")
         .eq("id", userId)
-        .single();
+        .maybeSingle(); // Changed from .single() to .maybeSingle()
 
-      if (error) throw error;
+      if (error && error.code !== "PGRST116") {
+        // Only throw if it's not a "no rows" error
+        throw error;
+      }
+
+      if (!data) {
+        // Profile doesn't exist, this shouldn't happen but handle it
+        console.warn("Profile not found for user:", userId);
+        set({ profile: null, loading: false });
+        return;
+      }
 
       set({ profile: data, loading: false });
     } catch (error) {
