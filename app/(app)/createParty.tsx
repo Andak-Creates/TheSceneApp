@@ -106,73 +106,6 @@ export default function CreatePartyScreen() {
     return `${displayHours}:${minutes} ${ampm}`;
   };
 
-  // Helping time date functions
-  const onStartDateChange = (event: any, selectedDate?: Date) => {
-    // Only close on Android when user presses OK or Cancel
-    if (Platform.OS === "android") {
-      setShowStartDatePicker(false);
-    }
-
-    if (event.type === "set" && selectedDate) {
-      setStartDateTime(selectedDate);
-      setStartDate(formatDate(selectedDate));
-      // Close on iOS after selection
-      if (Platform.OS === "ios") {
-        setShowStartDatePicker(false);
-      }
-    } else if (event.type === "dismissed") {
-      setShowStartDatePicker(false);
-    }
-  };
-
-  const onStartTimeChange = (event: any, selectedTime?: Date) => {
-    if (Platform.OS === "android") {
-      setShowStartTimePicker(false);
-    }
-
-    if (event.type === "set" && selectedTime) {
-      setStartDateTime(selectedTime);
-      setStartTime(selectedTime.toTimeString().slice(0, 5));
-      if (Platform.OS === "ios") {
-        setShowStartTimePicker(false);
-      }
-    } else if (event.type === "dismissed") {
-      setShowStartTimePicker(false);
-    }
-  };
-
-  const onEndDateChange = (event: any, selectedDate?: Date) => {
-    if (Platform.OS === "android") {
-      setShowEndDatePicker(false);
-    }
-
-    if (event.type === "set" && selectedDate) {
-      setEndDateTime(selectedDate);
-      setEndDate(formatDate(selectedDate));
-      if (Platform.OS === "ios") {
-        setShowEndDatePicker(false);
-      }
-    } else if (event.type === "dismissed") {
-      setShowEndDatePicker(false);
-    }
-  };
-
-  const onEndTimeChange = (event: any, selectedTime?: Date) => {
-    if (Platform.OS === "android") {
-      setShowEndTimePicker(false);
-    }
-
-    if (event.type === "set" && selectedTime) {
-      setEndDateTime(selectedTime);
-      setEndTime(selectedTime.toTimeString().slice(0, 5));
-      if (Platform.OS === "ios") {
-        setShowEndTimePicker(false);
-      }
-    } else if (event.type === "dismissed") {
-      setShowEndTimePicker(false);
-    }
-  };
-
   // Step 3: Vibe
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [selectedVibes, setSelectedVibes] = useState<string[]>([]);
@@ -315,7 +248,17 @@ export default function CreatePartyScreen() {
         data: { publicUrl },
       } = supabase.storage.from("flyers").getPublicUrl(filePath);
 
-      // 2. Create party with lowest tier price as main price
+      // 2. Parse date and time
+      const dateTimeString = `${startDate}T${startTime}:00`;
+      const partyDateTime = new Date(dateTimeString);
+
+      if (isNaN(partyDateTime.getTime())) {
+        throw new Error("Invalid start date or time");
+      }
+
+      const partyDateTimeISO = partyDateTime.toISOString();
+
+      // 3. Calculate totals from tiers
       const lowestPrice = Math.min(
         ...ticketTiers.map((t) => parseFloat(t.price)),
       );
@@ -324,24 +267,7 @@ export default function CreatePartyScreen() {
         0,
       );
 
-      // 3. Parse date and time correctly
-      // Expecting format: YYYY-MM-DD for date and HH:MM for time
-      const dateTimeString = `${startDate}T${startTime}:00`;
-      const partyDateTime = new Date(dateTimeString);
-
-      // Check if date is valid
-      if (isNaN(partyDateTime.getTime())) {
-        throw new Error(
-          "Invalid start date or time. Please use YYYY-MM-DD for date and HH:MM for time",
-        );
-      }
-
-      const partyDateTimeISO = partyDateTime.toISOString();
-
-      console.log("📅 Date string:", dateTimeString);
-      console.log("📅 Parsed date:", partyDateTime);
-      console.log("📅 ISO string:", partyDateTimeISO);
-
+      // 4. Create party
       const { data: party, error: partyError } = await supabase
         .from("parties")
         .insert({
@@ -354,6 +280,7 @@ export default function CreatePartyScreen() {
           city: city.trim(),
           ticket_price: lowestPrice,
           ticket_quantity: totalQuantity,
+          tickets_sold: 0,
           music_genres: selectedGenres,
           vibes: selectedVibes,
           is_published: true,
@@ -362,6 +289,24 @@ export default function CreatePartyScreen() {
         .single();
 
       if (partyError) throw partyError;
+
+      // 5. ✅ CREATE TICKET TIERS (THIS WAS MISSING!)
+      const tiersToInsert = ticketTiers.map((tier, index) => ({
+        party_id: party.id,
+        name: tier.name.trim(),
+        description: null,
+        price: parseFloat(tier.price),
+        quantity: parseInt(tier.quantity),
+        quantity_sold: 0,
+        tier_order: index,
+        is_active: true,
+      }));
+
+      const { error: tiersError } = await supabase
+        .from("ticket_tiers")
+        .insert(tiersToInsert);
+
+      if (tiersError) throw tiersError;
 
       Alert.alert("Success!", "Your party has been published!", [
         {

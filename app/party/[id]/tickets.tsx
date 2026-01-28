@@ -31,6 +31,7 @@ interface TicketTier {
   name: string;
   price: number;
   quantity: number;
+  quantity_sold: number;
   available: number;
 }
 
@@ -47,7 +48,7 @@ export default function TicketPurchaseScreen() {
   const [loading, setLoading] = useState(true);
   const [purchasing, setPurchasing] = useState(false);
 
-  const SERVICE_FEE_PERCENTAGE = 0.05; // 5%
+  const SERVICE_FEE_PERCENTAGE = 0.07; // 7%
 
   useEffect(() => {
     if (partyId) {
@@ -72,17 +73,25 @@ export default function TicketPurchaseScreen() {
       if (partyError) throw partyError;
       setParty(partyData);
 
-      // For MVP, create tiers from party data
-      // In production, you'd fetch from a ticket_tiers table
-      const tiers: TicketTier[] = [
-        {
-          id: "general",
-          name: "General Admission",
-          price: partyData.ticket_price,
-          quantity: partyData.ticket_quantity,
-          available: partyData.ticket_quantity - partyData.tickets_sold,
-        },
-      ];
+      // ✅ FETCH REAL TICKET TIERS FROM DATABASE
+      const { data: tiersData, error: tiersError } = await supabase
+        .from("ticket_tiers")
+        .select("*")
+        .eq("party_id", partyId)
+        .eq("is_active", true)
+        .order("tier_order", { ascending: true });
+
+      if (tiersError) throw tiersError;
+
+      // Calculate available tickets for each tier
+      const tiers: TicketTier[] = (tiersData || []).map((tier) => ({
+        id: tier.id,
+        name: tier.name,
+        price: tier.price,
+        quantity: tier.quantity,
+        quantity_sold: tier.quantity_sold || 0,
+        available: tier.quantity - (tier.quantity_sold || 0),
+      }));
 
       setTicketTiers(tiers);
       if (tiers.length > 0) {
@@ -97,58 +106,62 @@ export default function TicketPurchaseScreen() {
   };
 
   const handlePurchase = async () => {
-  if (!user || !selectedTier || !party) return;
+    if (!user || !selectedTier || !party) return;
 
-  const tier = ticketTiers.find((t) => t.id === selectedTier);
-  if (!tier) return;
+    const tier = ticketTiers.find((t) => t.id === selectedTier);
+    if (!tier) return;
 
-  if (quantity > tier.available) {
-    Alert.alert("Error", "Not enough tickets available");
-    return;
-  }
+    if (quantity > tier.available) {
+      Alert.alert("Error", "Not enough tickets available");
+      return;
+    }
 
-  setPurchasing(true);
+    setPurchasing(true);
 
-  try {
-    const ticketPrice = tier.price * quantity;
-    const serviceFee = ticketPrice * SERVICE_FEE_PERCENTAGE;
-    const totalPrice = ticketPrice + serviceFee;
+    try {
+      const ticketPrice = tier.price * quantity;
+      const serviceFee = ticketPrice * SERVICE_FEE_PERCENTAGE;
+      const totalPrice = ticketPrice + serviceFee;
 
-    // Create ticket purchase record WITH QUANTITY
-    const { error: ticketError } = await supabase.from("tickets").insert({
-      party_id: partyId,
-      user_id: user.id,
-      purchase_price: ticketPrice,
-      service_fee: serviceFee,
-      total_paid: totalPrice,
-      payment_status: "completed",
-      quantity_purchased: quantity, // Add this
-      quantity_used: 0, // Add this
-    });
+      // ✅ CREATE TICKET WITH TIER REFERENCE
+      const { error: ticketError } = await supabase.from("tickets").insert({
+        party_id: partyId,
+        user_id: user.id,
+        ticket_tier_id: selectedTier, // ✅ Link to tier
+        purchase_price: ticketPrice,
+        service_fee: serviceFee,
+        total_paid: totalPrice,
+        payment_status: "completed",
+        quantity_purchased: quantity,
+        quantity_used: 0,
+      });
 
-    if (ticketError) throw ticketError;
+      if (ticketError) throw ticketError;
 
-    Alert.alert(
-      "Success! 🎉",
-      `You've purchased ${quantity} ticket${quantity > 1 ? "s" : ""} for ${party.title}. Share the QR code with your friends!`,
-      [
-        {
-          text: "View Tickets",
-          onPress: () => router.push("/my-tickets"),
-        },
-        {
-          text: "OK",
-          onPress: () => router.back(),
-        },
-      ]
-    );
-  } catch (error: any) {
-    console.error("Purchase error:", error);
-    Alert.alert("Error", "Failed to complete purchase. Please try again.");
-  } finally {
-    setPurchasing(false);
-  }
-};
+      // ✅ REFRESH TIERS TO SHOW UPDATED AVAILABILITY
+      await fetchPartyAndTickets();
+
+      Alert.alert(
+        "Success! 🎉",
+        `You've purchased ${quantity} ${tier.name} ticket${quantity > 1 ? "s" : ""} for ${party.title}`,
+        [
+          {
+            text: "View Tickets",
+            onPress: () => router.push("/my-tickets"),
+          },
+          {
+            text: "OK",
+            onPress: () => router.back(),
+          },
+        ],
+      );
+    } catch (error: any) {
+      console.error("Purchase error:", error);
+      Alert.alert("Error", "Failed to complete purchase. Please try again.");
+    } finally {
+      setPurchasing(false);
+    }
+  };
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -181,6 +194,20 @@ export default function TicketPurchaseScreen() {
     return (
       <View className="flex-1 bg-[#191022] items-center justify-center">
         <Text className="text-white">Party not found</Text>
+      </View>
+    );
+  }
+
+  if (ticketTiers.length === 0) {
+    return (
+      <View className="flex-1 bg-[#191022] items-center justify-center px-6">
+        <Ionicons name="ticket-outline" size={64} color="#666" />
+        <Text className="text-white text-xl font-bold mt-4">
+          No Tickets Available
+        </Text>
+        <Text className="text-gray-400 text-center mt-2">
+          This party doesn't have any tickets for sale yet
+        </Text>
       </View>
     );
   }
@@ -244,10 +271,13 @@ export default function TicketPurchaseScreen() {
             <TouchableOpacity
               key={tier.id}
               onPress={() => setSelectedTier(tier.id)}
+              disabled={tier.available === 0}
               className={`border rounded-2xl p-4 mb-3 ${
-                selectedTier === tier.id
-                  ? "bg-purple-600/20 border-purple-600"
-                  : "bg-white/5 border-white/10"
+                tier.available === 0
+                  ? "bg-white/5 border-white/10 opacity-50"
+                  : selectedTier === tier.id
+                    ? "bg-purple-600/20 border-purple-600"
+                    : "bg-white/5 border-white/10"
               }`}
             >
               <View className="flex-row justify-between items-center mb-2">
@@ -258,105 +288,134 @@ export default function TicketPurchaseScreen() {
                   ₦{tier.price.toLocaleString()}
                 </Text>
               </View>
-              <Text className="text-gray-400 text-sm">
-                {tier.available} tickets available
+              <Text
+                className={
+                  tier.available === 0
+                    ? "text-red-400 text-sm"
+                    : "text-gray-400 text-sm"
+                }
+              >
+                {tier.available === 0
+                  ? "Sold Out"
+                  : `${tier.available} ticket${tier.available !== 1 ? "s" : ""} available`}
               </Text>
             </TouchableOpacity>
           ))}
 
           {/* Quantity Selector */}
-          <View className="mt-6">
-            <Text className="text-white font-bold text-base mb-3">
-              Quantity
-            </Text>
-            <View className="flex-row items-center justify-between bg-white/5 rounded-2xl p-4">
-              <TouchableOpacity
-                onPress={() => setQuantity(Math.max(1, quantity - 1))}
-                className="w-10 h-10 rounded-full bg-white/10 items-center justify-center"
-                disabled={quantity <= 1}
-              >
-                <Ionicons
-                  name="remove"
-                  size={20}
-                  color={quantity <= 1 ? "#666" : "#fff"}
-                />
-              </TouchableOpacity>
+          {selectedTierData && selectedTierData.available > 0 && (
+            <View className="mt-6">
+              <Text className="text-white font-bold text-base mb-3">
+                Quantity
+              </Text>
+              <View className="flex-row items-center justify-between bg-white/5 rounded-2xl p-4">
+                <TouchableOpacity
+                  onPress={() => setQuantity(Math.max(1, quantity - 1))}
+                  className="w-10 h-10 rounded-full bg-white/10 items-center justify-center"
+                  disabled={quantity <= 1}
+                >
+                  <Ionicons
+                    name="remove"
+                    size={20}
+                    color={quantity <= 1 ? "#666" : "#fff"}
+                  />
+                </TouchableOpacity>
 
-              <Text className="text-white font-bold text-2xl">{quantity}</Text>
+                <Text className="text-white font-bold text-2xl">
+                  {quantity}
+                </Text>
 
-              <TouchableOpacity
-                onPress={() =>
-                  setQuantity(
-                    Math.min(selectedTierData?.available || 1, quantity + 1),
-                  )
-                }
-                className="w-10 h-10 rounded-full bg-white/10 items-center justify-center"
-                disabled={quantity >= (selectedTierData?.available || 0)}
-              >
-                <Ionicons
-                  name="add"
-                  size={20}
-                  color={
-                    quantity >= (selectedTierData?.available || 0)
-                      ? "#666"
-                      : "#fff"
+                <TouchableOpacity
+                  onPress={() =>
+                    setQuantity(
+                      Math.min(selectedTierData.available, quantity + 1),
+                    )
                   }
-                />
-              </TouchableOpacity>
+                  className="w-10 h-10 rounded-full bg-white/10 items-center justify-center"
+                  disabled={quantity >= selectedTierData.available}
+                >
+                  <Ionicons
+                    name="add"
+                    size={20}
+                    color={
+                      quantity >= selectedTierData.available ? "#666" : "#fff"
+                    }
+                  />
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
+          )}
         </View>
 
         {/* Price Breakdown */}
-        <View className="px-6 py-6 bg-white/5 mx-6 rounded-2xl mb-6">
-          <Text className="text-white font-bold text-base mb-4">
-            Price Breakdown
-          </Text>
+        {selectedTierData && selectedTierData.available > 0 && (
+          <View className="px-6 py-6 bg-white/5 mx-6 rounded-2xl mb-6">
+            <Text className="text-white font-bold text-base mb-4">
+              Price Breakdown
+            </Text>
 
-          <View className="flex-row justify-between mb-2">
-            <Text className="text-gray-400">
-              Tickets ({quantity}x ₦{selectedTierData?.price.toLocaleString()})
-            </Text>
-            <Text className="text-white font-semibold">
-              ₦{subtotal.toLocaleString()}
-            </Text>
-          </View>
+            <View className="flex-row justify-between mb-2">
+              <Text className="text-gray-400">
+                Tickets ({quantity}x ₦{selectedTierData.price.toLocaleString()})
+              </Text>
+              <Text className="text-white font-semibold">
+                ₦{subtotal.toLocaleString()}
+              </Text>
+            </View>
 
-          <View className="flex-row justify-between mb-3 pb-3 border-b border-white/10">
-            <Text className="text-gray-400">Service Fee (5%)</Text>
-            <Text className="text-white font-semibold">
-              ₦{serviceFee.toLocaleString()}
-            </Text>
-          </View>
+            <View className="flex-row justify-between mb-3 pb-3 border-b border-white/10">
+              <Text className="text-gray-400">Service Fee (5%)</Text>
+              <Text className="text-white font-semibold">
+                ₦{serviceFee.toLocaleString()}
+              </Text>
+            </View>
 
-          <View className="flex-row justify-between">
-            <Text className="text-white font-bold text-lg">Total</Text>
-            <Text className="text-purple-400 font-bold text-xl">
-              ₦{total.toLocaleString()}
-            </Text>
+            <View className="flex-row justify-between">
+              <Text className="text-white font-bold text-lg">Total</Text>
+              <Text className="text-purple-400 font-bold text-xl">
+                ₦{total.toLocaleString()}
+              </Text>
+            </View>
           </View>
-        </View>
+        )}
       </ScrollView>
 
       {/* Fixed Purchase Button */}
       <View className="px-6 py-6 border-t border-white/10 bg-[#191022]">
         <TouchableOpacity
           onPress={handlePurchase}
-          disabled={purchasing || !selectedTier}
-          className="bg-purple-600 py-4 rounded-xl items-center"
-          style={{
-            shadowColor: "#8B5CF6",
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.3,
-            shadowRadius: 8,
-            elevation: 8,
-          }}
+          disabled={
+            purchasing ||
+            !selectedTier ||
+            !selectedTierData ||
+            selectedTierData.available === 0
+          }
+          className={`py-4 rounded-xl items-center ${
+            !selectedTier ||
+            !selectedTierData ||
+            selectedTierData.available === 0
+              ? "bg-gray-600"
+              : "bg-purple-600"
+          }`}
+          style={
+            selectedTier && selectedTierData && selectedTierData.available > 0
+              ? {
+                  shadowColor: "#8B5CF6",
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.3,
+                  shadowRadius: 8,
+                  elevation: 8,
+                }
+              : {}
+          }
         >
           {purchasing ? (
             <ActivityIndicator color="#fff" />
           ) : (
             <Text className="text-white font-bold text-lg">
-              Purchase for ₦{total.toLocaleString()}
+              {!selectedTierData || selectedTierData.available === 0
+                ? "Sold Out"
+                : `Purchase for ₦${total.toLocaleString()}`}
             </Text>
           )}
         </TouchableOpacity>

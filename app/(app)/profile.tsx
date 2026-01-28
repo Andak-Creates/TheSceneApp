@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  RefreshControl,
   ScrollView,
   Text,
   TextInput,
@@ -41,6 +42,7 @@ export default function ProfileScreen() {
     followers: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false); // ✅ ADD REFRESHING STATE
   const [signingOut, setSigningOut] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("reposts");
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -133,18 +135,31 @@ export default function ProfileScreen() {
           .select("*", { count: "exact", head: true })
           .eq("host_id", user.id);
 
+        // ✅ FETCH TIER DATA TO CALCULATE TICKETS SOLD
         const { data: parties } = await supabase
           .from("parties")
-          .select("tickets_sold")
+          .select("id")
           .eq("host_id", user.id);
+
+        let totalTickets = 0;
+        if (parties) {
+          for (const party of parties) {
+            const { data: tiers } = await supabase
+              .from("ticket_tiers")
+              .select("quantity_sold")
+              .eq("party_id", party.id)
+              .eq("is_active", true);
+
+            const partySold =
+              tiers?.reduce((sum, t) => sum + (t.quantity_sold || 0), 0) || 0;
+            totalTickets += partySold;
+          }
+        }
 
         const { data: reviews } = await supabase
           .from("reviews")
           .select("rating")
           .eq("host_id", user.id);
-
-        const totalTickets =
-          parties?.reduce((s, p) => s + (p.tickets_sold || 0), 0) || 0;
 
         const avgRating =
           reviews && reviews.length
@@ -154,7 +169,7 @@ export default function ProfileScreen() {
         setStats({
           ...baseStats,
           partiesHosted: hosted || 0,
-          totalTicketsSold: totalTickets,
+          totalTicketsSold: totalTickets, // ✅ USE TIER-BASED COUNT
           averageRating: avgRating,
           totalReviews: reviews?.length || 0,
         });
@@ -165,6 +180,16 @@ export default function ProfileScreen() {
       console.error(e);
     } finally {
       setLoading(false);
+      setRefreshing(false); // ✅ STOP REFRESHING
+    }
+  };
+
+  // ✅ ADD REFRESH HANDLER
+  const handleRefresh = () => {
+    setRefreshing(true);
+    fetchUserStats();
+    if (profile?.is_host) {
+      fetchHostedParties();
     }
   };
 
@@ -320,6 +345,14 @@ export default function ProfileScreen() {
     <ScrollView
       className="flex-1 bg-[#191022]"
       showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={handleRefresh}
+          tintColor="#8B5CF6"
+          colors={["#8B5CF6"]}
+        />
+      }
     >
       <View className="pt-14 px-6">
         {/* Header */}
@@ -459,6 +492,7 @@ export default function ProfileScreen() {
                 <Text className="text-gray-400 text-xs mt-1">Hosted</Text>
               </View>
               <View className="flex-1 items-center border-r border-white/10">
+                {/* ✅ NOW SHOWS CORRECT TIER-BASED COUNT */}
                 <Text className="text-white text-xl font-bold">
                   {stats.totalTicketsSold}
                 </Text>
@@ -516,9 +550,37 @@ export default function ProfileScreen() {
           )}
         </View>
 
+        {/* Host Dashboard Button - Only shows if user is a host */}
+        {profile.is_host && (
+          <TouchableOpacity
+            onPress={() => router.push({ pathname: "../host-dashboard" })}
+            className="bg-purple-600 rounded-2xl p-4 mb-0 flex-row items-center justify-between mt-4"
+            style={{
+              shadowColor: "#8B5CF6",
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.3,
+              shadowRadius: 8,
+              elevation: 8,
+            }}
+          >
+            <View className="flex-row items-center">
+              <Ionicons name="bar-chart" size={24} color="#fff" />
+              <View className="ml-3">
+                <Text className="text-white font-bold text-base">
+                  Host Dashboard
+                </Text>
+                <Text className="text-purple-200 text-sm">
+                  Manage parties & scan tickets
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#fff" />
+          </TouchableOpacity>
+        )}
+
         <TouchableOpacity
           onPress={() => router.push("/my-tickets")}
-          className="bg-purple-600/20 border border-purple-600/50 rounded-2xl p-4 mt-6 flex-row items-center justify-between"
+          className="bg-purple-600/20 border border-purple-600/50 rounded-2xl p-4 mt-4 flex-row items-center justify-between"
         >
           <View className="flex-row items-center">
             <Ionicons name="ticket" size={24} color="#8B5CF6" />
@@ -597,7 +659,6 @@ export default function ProfileScreen() {
             )}
           </View>
         ) : activeTab === "reposts" ? (
-          /* your existing reposts empty state content */
           <View className="items-center py-14">
             <View className="w-20 h-20 rounded-full bg-white/5 items-center justify-center mb-3">
               <Ionicons name="ticket-outline" size={36} color="#666" />
@@ -608,7 +669,6 @@ export default function ProfileScreen() {
             </Text>
           </View>
         ) : activeTab === "upcoming" ? (
-          /* existing upcoming empty state */
           <View className="items-center py-14">
             <View className="w-20 h-20 rounded-full bg-white/5 items-center justify-center mb-3">
               <Ionicons name="calendar-outline" size={36} color="#666" />
@@ -619,7 +679,6 @@ export default function ProfileScreen() {
             </Text>
           </View>
         ) : (
-          /* existing past empty state */
           <View className="items-center py-14">
             <View className="w-20 h-20 rounded-full bg-white/5 items-center justify-center mb-3">
               <Ionicons name="ticket-outline" size={36} color="#666" />

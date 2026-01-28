@@ -54,6 +54,15 @@ interface Comment {
   };
 }
 
+// ✅ ADD TICKET TIER INTERFACE
+interface TicketTier {
+  id: string;
+  name: string;
+  price: number;
+  quantity: number;
+  quantity_sold: number;
+}
+
 export default function PartyDetailScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -66,12 +75,51 @@ export default function PartyDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [submittingComment, setSubmittingComment] = useState(false);
 
+  // ✅ ADD STATE FOR TIERS
+  const [ticketTiers, setTicketTiers] = useState<TicketTier[]>([]);
+  const [totalTickets, setTotalTickets] = useState(0);
+  const [totalSold, setTotalSold] = useState(0);
+  const [minPrice, setMinPrice] = useState(0);
+
   useEffect(() => {
     if (partyId) {
       fetchPartyDetails();
       fetchComments();
+      fetchTicketTiers(); // ✅ FETCH TIERS
     }
   }, [partyId]);
+
+  // ✅ NEW FUNCTION TO FETCH TICKET TIERS
+  const fetchTicketTiers = async () => {
+    try {
+      const { data: tiersData, error } = await supabase
+        .from("ticket_tiers")
+        .select("*")
+        .eq("party_id", partyId)
+        .eq("is_active", true)
+        .order("tier_order", { ascending: true });
+
+      if (error) throw error;
+
+      if (tiersData && tiersData.length > 0) {
+        setTicketTiers(tiersData);
+
+        // Calculate totals from tiers
+        const total = tiersData.reduce((sum, tier) => sum + tier.quantity, 0);
+        const sold = tiersData.reduce(
+          (sum, tier) => sum + (tier.quantity_sold || 0),
+          0,
+        );
+        const lowest = Math.min(...tiersData.map((t) => t.price));
+
+        setTotalTickets(total);
+        setTotalSold(sold);
+        setMinPrice(lowest);
+      }
+    } catch (error) {
+      console.error("Error fetching ticket tiers:", error);
+    }
+  };
 
   const fetchPartyDetails = async () => {
     try {
@@ -258,6 +306,10 @@ export default function PartyDetailScreen() {
     );
   }
 
+  // ✅ CALCULATE REMAINING FROM TIERS
+  const ticketsRemaining = totalTickets - totalSold;
+  const displayPrice = ticketTiers.length > 0 ? minPrice : party.ticket_price;
+
   return (
     <View className="flex-1 bg-[#191022]">
       <ScrollView showsVerticalScrollIndicator={false}>
@@ -362,18 +414,35 @@ export default function PartyDetailScreen() {
             </View>
           </View>
 
-          {/* Ticket Info */}
+          {/* ✅ UPDATED TICKET INFO - NOW USES TIERS */}
           <View className="bg-purple-600/10 border border-purple-600/30 rounded-2xl p-4 mb-4">
             <View className="flex-row justify-between items-center mb-2">
               <Text className="text-white font-bold text-lg">Tickets</Text>
               <Text className="text-purple-400 font-bold text-xl">
-                ₦{party.ticket_price.toLocaleString()}
+                {ticketTiers.length > 1 ? "From " : ""}₦
+                {displayPrice.toLocaleString()}
               </Text>
             </View>
             <Text className="text-gray-400 text-sm">
-              {party.ticket_quantity - party.tickets_sold} of{" "}
-              {party.ticket_quantity} available
+              {ticketsRemaining} of {totalTickets} available
             </Text>
+
+            {/* ✅ SHOW TIER BREAKDOWN IF MULTIPLE TIERS */}
+            {ticketTiers.length > 1 && (
+              <View className="mt-3 pt-3 border-t border-white/10">
+                {ticketTiers.map((tier) => (
+                  <View
+                    key={tier.id}
+                    className="flex-row justify-between items-center py-1"
+                  >
+                    <Text className="text-gray-400 text-xs">{tier.name}</Text>
+                    <Text className="text-gray-400 text-xs">
+                      {tier.quantity - tier.quantity_sold}/{tier.quantity} left
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
 
           {/* Engagement Stats */}
@@ -479,7 +548,8 @@ export default function PartyDetailScreen() {
           className="bg-purple-600 py-4 rounded-xl items-center"
         >
           <Text className="text-white font-bold text-lg">
-            Get Tickets • ₦{party.ticket_price.toLocaleString()}
+            Get Tickets • {ticketTiers.length > 1 ? "From " : ""}₦
+            {displayPrice.toLocaleString()}
           </Text>
         </TouchableOpacity>
       </View>
