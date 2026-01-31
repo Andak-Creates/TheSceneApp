@@ -323,13 +323,15 @@ export default function FeedScreen() {
         </View>
 
         {/* Get Tickets Button */}
-        <TouchableOpacity className="bg-purple-600 py-3 rounded-xl items-center"
-         onPress={() =>
+        <TouchableOpacity
+          className="bg-purple-600 py-3 rounded-xl items-center"
+          onPress={() =>
             router.push({
               pathname: "/party/[id]/tickets",
               params: { id: party.id },
             })
-          }>
+          }
+        >
           <Text className="text-white font-bold text-base">
             Get Tickets • ₦{party.ticket_price.toLocaleString()}
           </Text>
@@ -367,11 +369,11 @@ export default function FeedScreen() {
           />
         }
         ListEmptyComponent={
-          <View className="items-center justify-center py-20">
+          <View className=" items-center justify-center py-20">
             <Ionicons name="calendar-outline" size={64} color="#666" />
             <Text className="text-gray-400 text-lg mt-4">No parties yet</Text>
             <Text className="text-gray-600 text-sm mt-2">
-              Be the first to create one!
+              Come back later or be the first to create one!
             </Text>
           </View>
         }

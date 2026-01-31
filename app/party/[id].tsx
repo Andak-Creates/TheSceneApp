@@ -7,7 +7,9 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  KeyboardAvoidingView,
   Linking,
+  Platform,
   ScrollView,
   Text,
   TextInput,
@@ -312,229 +314,243 @@ export default function PartyDetailScreen() {
 
   return (
     <View className="flex-1 bg-[#191022]">
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header with Back Button */}
-        <View className="absolute top-12 left-4 right-4 z-10 flex-row justify-between">
-          <TouchableOpacity
-            onPress={() => router.back()}
-            className="w-10 h-10 rounded-full bg-black/50 items-center justify-center"
-          >
-            <Ionicons name="arrow-back" size={24} color="#fff" />
-          </TouchableOpacity>
-          <TouchableOpacity className="w-10 h-10 rounded-full bg-black/50 items-center justify-center">
-            <Ionicons name="share-outline" size={24} color="#fff" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Party Flyer */}
-        <ImageBackground
-          source={{ uri: party.flyer_url }}
-          className="w-full"
-          style={{ aspectRatio: 4 / 5 }}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={{ flex: 1 }}
+      >
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
         >
-          {/* Gradient overlay */}
-          <LinearGradient
-            colors={["transparent", "rgba(25,16,34,0.8)", "rgba(25,16,34,1)"]}
-            style={{
-              position: "absolute",
-              bottom: 0,
-              left: 0,
-              right: 0,
-              padding: 16,
-            }}
-          >
-            {/* Title */}
-            <Text className="text-white text-3xl font-bold">
-              {party.host?.username}: {party.title}
-            </Text>
-
-            {/* Description */}
-            {party.description && (
-              <Text className="text-gray-300 text-base mb-4">
-                {party.description}
-              </Text>
-            )}
-          </LinearGradient>
-        </ImageBackground>
-
-        {/* Party Info */}
-        <View className="px-6 pb-6">
-          {/* Date & Time */}
-          <View className=" mb-4 flex flex-row items-center">
-            <View className="bg-white/5 rounded-2xl p-4">
-              <Ionicons name="calendar" size={20} color="#8B5CF6" />
-            </View>
-            <View>
-              <Text className="text-white font-semibold text-base ml-3">
-                {formatDate(party.date)}
-              </Text>
-              <Text className="text-gray-400 text-sm ml-3">
-                Add to calender
-              </Text>
-            </View>
+          {/* Header with Back Button */}
+          <View className="absolute top-12 left-4 right-4 z-10 flex-row justify-between">
+            <TouchableOpacity
+              onPress={() => router.back()}
+              className="w-10 h-10 rounded-full bg-black/50 items-center justify-center"
+            >
+              <Ionicons name="arrow-back" size={24} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity className="w-10 h-10 rounded-full bg-black/50 items-center justify-center">
+              <Ionicons name="share-outline" size={24} color="#fff" />
+            </TouchableOpacity>
           </View>
 
-          {/* Location */}
-          <TouchableOpacity
-            className=" mb-8 flex-row items-center"
-            onPress={handleOpenMaps}
+          {/* Party Flyer */}
+          <ImageBackground
+            source={{ uri: party.flyer_url }}
+            className="w-full"
+            style={{ aspectRatio: 4 / 5 }}
           >
-            <View className="bg-white/5 rounded-2xl p-4">
-              <Ionicons name="location" size={20} color="#8B5CF6" />
-            </View>
-
-            <View className="ml-3 flex-1">
-              <Text className="text-white font-semibold text-base">
-                {party.location}
+            {/* Gradient overlay */}
+            <LinearGradient
+              colors={["transparent", "rgba(25,16,34,0.8)", "rgba(25,16,34,1)"]}
+              style={{
+                position: "absolute",
+                bottom: 0,
+                left: 0,
+                right: 0,
+                padding: 16,
+              }}
+            >
+              {/* Title */}
+              <Text className="text-white text-3xl font-bold">
+                {party.host?.username}: {party.title}
               </Text>
-              <Text className="text-gray-400 text-sm">{party.city}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="#666" />
-          </TouchableOpacity>
 
-          {/* Music & Vibes */}
-          <View className="mb-4">
-            <Text className="text-white font-bold text-base mb-2">
-              Music & Vibe
-            </Text>
-            <View className="flex-row flex-wrap gap-2">
-              {party.music_genres.map((genre) => (
-                <View
-                  key={genre}
-                  className="bg-purple-600/20 px-3 py-2 rounded-full"
-                >
-                  <Text className="text-purple-300 text-sm">{genre}</Text>
-                </View>
-              ))}
-              {party.vibes.map((vibe) => (
-                <View key={vibe} className="bg-white/10 px-3 py-2 rounded-full">
-                  <Text className="text-gray-300 text-sm">{vibe}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
+              {/* Description */}
+              {party.description && (
+                <Text className="text-gray-300 text-base mb-4">
+                  {party.description}
+                </Text>
+              )}
+            </LinearGradient>
+          </ImageBackground>
 
-          {/* ✅ UPDATED TICKET INFO - NOW USES TIERS */}
-          <View className="bg-purple-600/10 border border-purple-600/30 rounded-2xl p-4 mb-4">
-            <View className="flex-row justify-between items-center mb-2">
-              <Text className="text-white font-bold text-lg">Tickets</Text>
-              <Text className="text-purple-400 font-bold text-xl">
-                {ticketTiers.length > 1 ? "From " : ""}₦
-                {displayPrice.toLocaleString()}
+          {/* Party Info */}
+          <View className="px-6 pb-6">
+            {/* Date & Time */}
+            <View className=" mb-4 flex flex-row items-center">
+              <View className="bg-white/5 rounded-2xl p-4">
+                <Ionicons name="calendar" size={20} color="#8B5CF6" />
+              </View>
+              <View>
+                <Text className="text-white font-semibold text-base ml-3">
+                  {formatDate(party.date)}
+                </Text>
+                <Text className="text-gray-400 text-sm ml-3">
+                  Add to calender
+                </Text>
+              </View>
+            </View>
+
+            {/* Location */}
+            <TouchableOpacity
+              className=" mb-8 flex-row items-center"
+              onPress={handleOpenMaps}
+            >
+              <View className="bg-white/5 rounded-2xl p-4">
+                <Ionicons name="location" size={20} color="#8B5CF6" />
+              </View>
+
+              <View className="ml-3 flex-1">
+                <Text className="text-white font-semibold text-base">
+                  {party.location}
+                </Text>
+                <Text className="text-gray-400 text-sm">{party.city}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#666" />
+            </TouchableOpacity>
+
+            {/* Music & Vibes */}
+            <View className="mb-4">
+              <Text className="text-white font-bold text-base mb-2">
+                Music & Vibe
               </Text>
-            </View>
-            <Text className="text-gray-400 text-sm">
-              {ticketsRemaining} of {totalTickets} available
-            </Text>
-
-            {/* ✅ SHOW TIER BREAKDOWN IF MULTIPLE TIERS */}
-            {ticketTiers.length > 1 && (
-              <View className="mt-3 pt-3 border-t border-white/10">
-                {ticketTiers.map((tier) => (
+              <View className="flex-row flex-wrap gap-2">
+                {party.music_genres.map((genre) => (
                   <View
-                    key={tier.id}
-                    className="flex-row justify-between items-center py-1"
+                    key={genre}
+                    className="bg-purple-600/20 px-3 py-2 rounded-full"
                   >
-                    <Text className="text-gray-400 text-xs">{tier.name}</Text>
-                    <Text className="text-gray-400 text-xs">
-                      {tier.quantity - tier.quantity_sold}/{tier.quantity} left
-                    </Text>
+                    <Text className="text-purple-300 text-sm">{genre}</Text>
+                  </View>
+                ))}
+                {party.vibes.map((vibe) => (
+                  <View
+                    key={vibe}
+                    className="bg-white/10 px-3 py-2 rounded-full"
+                  >
+                    <Text className="text-gray-300 text-sm">{vibe}</Text>
                   </View>
                 ))}
               </View>
-            )}
-          </View>
-
-          {/* Engagement Stats */}
-          <View className="flex-row items-center mb-6">
-            <TouchableOpacity
-              className="flex-row items-center mr-6"
-              onPress={handleLike}
-            >
-              <Ionicons
-                name={party.is_liked ? "heart" : "heart-outline"}
-                size={28}
-                color={party.is_liked ? "#ef4444" : "#fff"}
-              />
-              <Text className="text-white ml-2 font-semibold text-base">
-                {party.likes_count}
-              </Text>
-            </TouchableOpacity>
-
-            <View className="flex-row items-center">
-              <Ionicons name="chatbubble-outline" size={26} color="#fff" />
-              <Text className="text-white ml-2 font-semibold text-base">
-                {party.comments_count}
-              </Text>
             </View>
-          </View>
 
-          {/* Comments Section */}
-          <View className="mb-20">
-            <Text className="text-white font-bold text-lg mb-4">Comments</Text>
+            {/* ✅ UPDATED TICKET INFO - NOW USES TIERS */}
+            <View className="bg-purple-600/10 border border-purple-600/30 rounded-2xl p-4 mb-4">
+              <View className="flex-row justify-between items-center mb-2">
+                <Text className="text-white font-bold text-lg">Tickets</Text>
+                <Text className="text-purple-400 font-bold text-xl">
+                  {ticketTiers.length > 1 ? "From " : ""}₦
+                  {displayPrice.toLocaleString()}
+                </Text>
+              </View>
+              <Text className="text-gray-400 text-sm">
+                {ticketsRemaining} of {totalTickets} available
+              </Text>
 
-            {/* Comment Input */}
-            <View className="flex-row items-center mb-4">
-              <TextInput
-                className="flex-1 bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white mr-2"
-                placeholder="Add a comment..."
-                placeholderTextColor="#666"
-                value={newComment}
-                onChangeText={setNewComment}
-                multiline
-              />
+              {/* ✅ SHOW TIER BREAKDOWN IF MULTIPLE TIERS */}
+              {ticketTiers.length > 1 && (
+                <View className="mt-3 pt-3 border-t border-white/10">
+                  {ticketTiers.map((tier) => (
+                    <View
+                      key={tier.id}
+                      className="flex-row justify-between items-center py-1"
+                    >
+                      <Text className="text-gray-400 text-xs">{tier.name}</Text>
+                      <Text className="text-gray-400 text-xs">
+                        {tier.quantity - tier.quantity_sold}/{tier.quantity}{" "}
+                        left
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+
+            {/* Engagement Stats */}
+            <View className="flex-row items-center mb-6">
               <TouchableOpacity
-                onPress={handleSubmitComment}
-                disabled={!newComment.trim() || submittingComment}
-                className={`w-10 h-10 rounded-full items-center justify-center ${
-                  newComment.trim() ? "bg-purple-600" : "bg-white/10"
-                }`}
+                className="flex-row items-center mr-6"
+                onPress={handleLike}
               >
-                {submittingComment ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Ionicons name="send" size={18} color="#fff" />
-                )}
+                <Ionicons
+                  name={party.is_liked ? "heart" : "heart-outline"}
+                  size={28}
+                  color={party.is_liked ? "#ef4444" : "#fff"}
+                />
+                <Text className="text-white ml-2 font-semibold text-base">
+                  {party.likes_count}
+                </Text>
               </TouchableOpacity>
+
+              <View className="flex-row items-center">
+                <Ionicons name="chatbubble-outline" size={26} color="#fff" />
+                <Text className="text-white ml-2 font-semibold text-base">
+                  {party.comments_count}
+                </Text>
+              </View>
             </View>
 
-            {/* Comments List */}
-            {comments.map((comment) => (
-              <View
-                key={comment.id}
-                className="flex-row mb-4 bg-white/5 rounded-xl p-3"
-              >
-                {comment.user.avatar_url ? (
-                  <Image
-                    source={{ uri: comment.user.avatar_url }}
-                    className="w-8 h-8 rounded-full"
-                  />
-                ) : (
-                  <View className="w-8 h-8 rounded-full bg-purple-600 items-center justify-center">
-                    <Text className="text-white text-xs font-bold">
-                      {comment.user.username.charAt(0).toUpperCase()}
+            {/* Comments Section */}
+            <View className="mb-20">
+              {/* Comments List */}
+              {comments.map((comment) => (
+                <View
+                  key={comment.id}
+                  className="flex-row mb-4 bg-white/5 rounded-xl p-3"
+                >
+                  {comment.user.avatar_url ? (
+                    <Image
+                      source={{ uri: comment.user.avatar_url }}
+                      className="w-8 h-8 rounded-full"
+                    />
+                  ) : (
+                    <View className="w-8 h-8 rounded-full bg-purple-600 items-center justify-center">
+                      <Text className="text-white text-xs font-bold">
+                        {comment.user.username.charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                  )}
+                  <View className="ml-3 flex-1">
+                    <Text className="text-white font-semibold text-sm">
+                      {comment.user.username}
+                    </Text>
+                    <Text className="text-gray-300 text-sm mt-1">
+                      {comment.comment_text}
                     </Text>
                   </View>
-                )}
-                <View className="ml-3 flex-1">
-                  <Text className="text-white font-semibold text-sm">
-                    {comment.user.username}
-                  </Text>
-                  <Text className="text-gray-300 text-sm mt-1">
-                    {comment.comment_text}
-                  </Text>
                 </View>
-              </View>
-            ))}
+              ))}
 
-            {comments.length === 0 && (
-              <Text className="text-gray-500 text-center py-4">
-                No comments yet. Be the first!
+              {comments.length === 0 && (
+                <Text className="text-gray-500 text-center py-4">
+                  No comments yet. Be the first!
+                </Text>
+              )}
+
+              <Text className="text-white font-bold text-lg mb-4">
+                Comments
               </Text>
-            )}
+
+              {/* Comment Input */}
+              <View className="flex-row items-center mb-4">
+                <TextInput
+                  className="flex-1 bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white mr-2"
+                  placeholder="Add a comment..."
+                  placeholderTextColor="#666"
+                  value={newComment}
+                  onChangeText={setNewComment}
+                  multiline
+                />
+                <TouchableOpacity
+                  onPress={handleSubmitComment}
+                  disabled={!newComment.trim() || submittingComment}
+                  className={`w-10 h-10 rounded-full items-center justify-center ${
+                    newComment.trim() ? "bg-purple-600" : "bg-white/10"
+                  }`}
+                >
+                  {submittingComment ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Ionicons name="send" size={18} color="#fff" />
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Fixed Get Tickets Button */}
       <View className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-[#191022] to-transparent">

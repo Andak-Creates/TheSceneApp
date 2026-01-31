@@ -23,7 +23,7 @@ export default function SignUpScreen() {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -44,11 +44,6 @@ export default function SignUpScreen() {
       return;
     }
 
-    if (confirmPassword !== password) {
-      setError("Your pass words do not match");
-      return;
-    }
-
     setLoading(true);
     setError("");
 
@@ -63,7 +58,6 @@ export default function SignUpScreen() {
       router.replace("/(auth)/onboarding");
       setUsername("");
       setPassword("");
-      setConfirmPassword("");
       setEmail("");
     }
   };
@@ -175,23 +169,6 @@ export default function SignUpScreen() {
                   placeholderTextColor="#888"
                   value={password}
                   onChangeText={setPassword}
-                  secureTextEntry
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-              </View>
-
-              {/* Confirm Password Input */}
-              <View>
-                <Text className="text-gray-400 text-sm font-medium mb-2 ml-1">
-                  Confirm Password
-                </Text>
-                <TextInput
-                  className="bg-white/10 border border-white/20 rounded-xl h-14 px-5 text-white text-base"
-                  placeholder="Confirm your password"
-                  placeholderTextColor="#888"
-                  value={confirmPassword}
-                  onChangeText={setConfirmPassword}
                   secureTextEntry
                   autoCapitalize="none"
                   autoCorrect={false}

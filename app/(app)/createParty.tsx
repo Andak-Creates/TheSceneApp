@@ -453,8 +453,8 @@ export default function CreatePartyScreen() {
                   animationType="slide"
                   visible={showStartDatePicker}
                 >
-                  <View className="flex-1 justify-end bg-black/50">
-                    <View className="bg-[#191022] rounded-t-3xl">
+                  <View className="flex-1 justify-center bg-black/50">
+                    <View className="bg-[#191022] rounded-3xl">
                       {/* Header with Done button */}
                       <View className="flex-row justify-between items-center px-6 py-4 border-b border-white/10">
                         <TouchableOpacity
@@ -502,8 +502,8 @@ export default function CreatePartyScreen() {
                   animationType="slide"
                   visible={showStartTimePicker}
                 >
-                  <View className="flex-1 justify-end bg-black/50">
-                    <View className="bg-[#191022] rounded-t-3xl">
+                  <View className="flex-1 pb-8 justify-center bg-black/50">
+                    <View className="bg-[#191022] rounded-3xl">
                       <View className="flex-row justify-between items-center px-6 py-4 border-b border-white/10">
                         <TouchableOpacity
                           onPress={() => setShowStartTimePicker(false)}
@@ -578,8 +578,8 @@ export default function CreatePartyScreen() {
                   animationType="slide"
                   visible={showEndDatePicker}
                 >
-                  <View className="flex-1 justify-end bg-black/50">
-                    <View className="bg-[#191022] rounded-t-3xl">
+                  <View className="flex-1 justify-center bg-black/50">
+                    <View className="bg-[#191022] rounded-3xl">
                       <View className="flex-row justify-between items-center px-6 py-4 border-b border-white/10">
                         <TouchableOpacity
                           onPress={() => setShowEndDatePicker(false)}
@@ -625,8 +625,8 @@ export default function CreatePartyScreen() {
                   animationType="slide"
                   visible={showEndTimePicker}
                 >
-                  <View className="flex-1 justify-end bg-black/50">
-                    <View className="bg-[#191022] rounded-t-3xl">
+                  <View className="flex-1 justify-center bg-black/50">
+                    <View className="bg-[#191022] rounded-3xl">
                       <View className="flex-row justify-between items-center px-6 py-4 border-b border-white/10">
                         <TouchableOpacity
                           onPress={() => setShowEndTimePicker(false)}

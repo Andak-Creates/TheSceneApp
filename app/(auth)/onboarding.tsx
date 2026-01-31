@@ -4,6 +4,8 @@ import { useState } from "react";
 import {
   ActivityIndicator,
   ImageBackground,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -57,13 +59,13 @@ export default function OnboardingScreen() {
 
   const toggleGenre = (genre: string) => {
     setSelectedGenres((prev) =>
-      prev.includes(genre) ? prev.filter((g) => g !== genre) : [...prev, genre]
+      prev.includes(genre) ? prev.filter((g) => g !== genre) : [...prev, genre],
     );
   };
 
   const toggleVibe = (vibe: string) => {
     setSelectedVibes((prev) =>
-      prev.includes(vibe) ? prev.filter((v) => v !== vibe) : [...prev, vibe]
+      prev.includes(vibe) ? prev.filter((v) => v !== vibe) : [...prev, vibe],
     );
   };
 
@@ -147,138 +149,139 @@ export default function OnboardingScreen() {
         style={[StyleSheet.absoluteFillObject, { top: "20%" }]}
       />
 
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={{ flex: 1 }}
       >
-        <View className="flex-1 px-6 pb-8 pt-16">
-          {/* Progress Indicator */}
-          <View className="flex-row gap-2 mb-8">
-            <View className="flex-1 h-1 bg-purple-500 rounded-full" />
-            <View className="flex-1 h-1 bg-white/20 rounded-full" />
-            <View className="flex-1 h-1 bg-white/20 rounded-full" />
-          </View>
-
-          {/* Title Section */}
-          <View className="mb-8">
-            <Text className="text-white text-left tracking-tight text-[36px] font-extrabold leading-tight mb-3">
-              Set Your{"\n"}
-              <Text className="text-purple-500">Vibe</Text>
-            </Text>
-            <Text className="text-gray-300 text-left text-base font-medium leading-relaxed">
-              Tell us what you like so we can show you the best parties
-            </Text>
-          </View>
-
-          {/* Error Message */}
-          {error ? (
-            <View className="bg-red-500/20 border border-red-500/50 rounded-xl p-4 mb-4">
-              <Text className="text-red-300 text-sm font-medium">{error}</Text>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View className="flex-1 px-6 pb-8 pt-16">
+            {/* Progress Indicator */}
+            <View className="flex-row gap-2 mb-8">
+              <View className="flex-1 h-1 bg-purple-500 rounded-full" />
+              <View className="flex-1 h-1 bg-white/20 rounded-full" />
+              <View className="flex-1 h-1 bg-white/20 rounded-full" />
             </View>
-          ) : null}
 
-          {/* Music Genres Section */}
-          <View className="mb-8">
-            <Text className="text-white text-lg font-bold mb-3">
-              Music You Love
-            </Text>
-            <View className="flex-row flex-wrap gap-3">
-              {MUSIC_GENRES.map((genre) => (
-                <TouchableOpacity
-                  key={genre}
-                  onPress={() => toggleGenre(genre)}
-                  className={`px-4 py-3 rounded-full border ${
-                    selectedGenres.includes(genre)
-                      ? "bg-purple-600 border-purple-600"
-                      : "bg-white/10 border-white/20"
-                  }`}
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    className={`font-semibold ${
-                      selectedGenres.includes(genre)
-                        ? "text-white"
-                        : "text-gray-300"
-                    }`}
-                  >
-                    {genre}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          {/* Vibes Section */}
-          <View className="mb-8">
-            <Text className="text-white text-lg font-bold mb-3">Your Vibe</Text>
-            <View className="flex-row flex-wrap gap-3">
-              {VIBES.map((vibe) => (
-                <TouchableOpacity
-                  key={vibe}
-                  onPress={() => toggleVibe(vibe)}
-                  className={`px-4 py-3 rounded-full border ${
-                    selectedVibes.includes(vibe)
-                      ? "bg-purple-600 border-purple-600"
-                      : "bg-white/10 border-white/20"
-                  }`}
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    className={`font-semibold ${
-                      selectedVibes.includes(vibe)
-                        ? "text-white"
-                        : "text-gray-300"
-                    }`}
-                  >
-                    {vibe}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          {/* City Input */}
-          <View className="mb-8">
-            <Text className="text-white text-lg font-bold mb-3">Your City</Text>
-            <TextInput
-              className="bg-white/10 border border-white/20 rounded-xl h-14 px-5 text-white text-base"
-              placeholder="e.g., Lagos, Accra, London"
-              placeholderTextColor="#888"
-              value={city}
-              onChangeText={setCity}
-              autoCapitalize="words"
-              autoCorrect={false}
-            />
-          </View>
-
-          {/* Continue Button */}
-          <TouchableOpacity
-            className="items-center justify-center rounded-xl h-14 px-5 bg-purple-600 mb-4"
-            style={styles.primaryButton}
-            activeOpacity={0.9}
-            onPress={handleContinue}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text className="text-white text-lg font-bold">
-                Continue to Feed
+            {/* Title Section */}
+            <View className="mb-8">
+              <Text className="text-white text-left tracking-tight text-[36px] font-extrabold leading-tight mb-3">
+                Set Your{"\n"}
+                <Text className="text-purple-500">Vibe</Text>
               </Text>
-            )}
-          </TouchableOpacity>
+              <Text className="text-gray-300 text-left text-base font-medium leading-relaxed">
+                Tell us what you like so we can show you the best parties
+              </Text>
+            </View>
 
-          {/* Skip for now */}
-          <TouchableOpacity
-            className="items-center py-3"
-            onPress={() => router.replace("/(app)/feed")}
-          >
-            <Text className="text-gray-400 text-sm underline">
-              Skip for now
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
+            {/* Error Message */}
+            {error ? (
+              <View className="bg-red-500/20 border border-red-500/50 rounded-xl p-4 mb-4">
+                <Text className="text-red-300 text-sm font-medium">
+                  {error}
+                </Text>
+              </View>
+            ) : null}
+
+            {/* Music Genres Section */}
+            <View className="mb-8">
+              <Text className="text-white text-lg font-bold mb-3">
+                Music You Love
+              </Text>
+              <View className="flex-row flex-wrap gap-3">
+                {MUSIC_GENRES.map((genre) => (
+                  <TouchableOpacity
+                    key={genre}
+                    onPress={() => toggleGenre(genre)}
+                    className={`px-4 py-3 rounded-full border ${
+                      selectedGenres.includes(genre)
+                        ? "bg-purple-600 border-purple-600"
+                        : "bg-white/10 border-white/20"
+                    }`}
+                    activeOpacity={0.7}
+                  >
+                    <Text
+                      className={`font-semibold ${
+                        selectedGenres.includes(genre)
+                          ? "text-white"
+                          : "text-gray-300"
+                      }`}
+                    >
+                      {genre}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* Vibes Section */}
+            <View className="mb-8">
+              <Text className="text-white text-lg font-bold mb-3">
+                Your Vibe
+              </Text>
+              <View className="flex-row flex-wrap gap-3">
+                {VIBES.map((vibe) => (
+                  <TouchableOpacity
+                    key={vibe}
+                    onPress={() => toggleVibe(vibe)}
+                    className={`px-4 py-3 rounded-full border ${
+                      selectedVibes.includes(vibe)
+                        ? "bg-purple-600 border-purple-600"
+                        : "bg-white/10 border-white/20"
+                    }`}
+                    activeOpacity={0.7}
+                  >
+                    <Text
+                      className={`font-semibold ${
+                        selectedVibes.includes(vibe)
+                          ? "text-white"
+                          : "text-gray-300"
+                      }`}
+                    >
+                      {vibe}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* City Input */}
+            <View className="mb-8">
+              <Text className="text-white text-lg font-bold mb-3">
+                Your City
+              </Text>
+              <TextInput
+                className="bg-white/10 border border-white/20 rounded-xl h-14 px-5 text-white text-base"
+                placeholder="e.g., Lagos, Accra, London"
+                placeholderTextColor="#888"
+                value={city}
+                onChangeText={setCity}
+                autoCapitalize="words"
+                autoCorrect={false}
+              />
+            </View>
+
+            {/* Continue Button */}
+            <TouchableOpacity
+              className="items-center justify-center rounded-xl h-14 px-5 bg-purple-600 mb-4"
+              style={styles.primaryButton}
+              activeOpacity={0.9}
+              onPress={handleContinue}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text className="text-white text-lg font-bold">
+                  Continue to Feed
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </ImageBackground>
   );
 }

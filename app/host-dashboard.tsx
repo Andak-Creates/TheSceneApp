@@ -186,59 +186,135 @@ export default function HostDashboardScreen() {
     setScanning(true);
 
     try {
+      console.log("📱 QR Code scanned:", data);
+
       // Parse QR code data
-      const qrData = JSON.parse(data);
-      const { ticketId } = qrData;
+      let qrData;
+      try {
+        qrData = JSON.parse(data);
+      } catch (parseError) {
+        console.error("❌ Failed to parse QR code:", parseError);
+        setScanResult({
+          success: false,
+          message: "Invalid QR code format",
+        });
+        setTimeout(() => setScanning(false), 3000);
+        return;
+      }
+
+      const { ticketId, partyId } = qrData; // ✅ Get partyId from QR code
+      console.log("🎫 Ticket ID:", ticketId);
+      console.log("🎉 Party ID from QR:", partyId);
 
       if (!ticketId) {
         setScanResult({
           success: false,
-          message: "Invalid QR code",
+          message: "Invalid QR code - missing ticket ID",
         });
+        setTimeout(() => setScanning(false), 3000);
         return;
       }
 
       // ✅ VERIFY TICKET BELONGS TO SELECTED PARTY
       if (selectedPartyForScan) {
-        const { data: ticket } = await supabase
-          .from("tickets")
-          .select("party_id")
-          .eq("id", ticketId)
-          .single();
+        console.log("🔍 Selected party for scan:", selectedPartyForScan);
 
-        if (!ticket || ticket.party_id !== selectedPartyForScan) {
+        // Compare the partyId from QR code with selected party
+        const qrPartyId = String(partyId);
+        const selectedPartyId = String(selectedPartyForScan);
+
+        console.log("🔍 Comparing:", { qrPartyId, selectedPartyId });
+
+        if (qrPartyId !== selectedPartyId) {
+          // Get party names for better error message
+          const { data: qrParty } = await supabase
+            .from("parties")
+            .select("title")
+            .eq("id", partyId)
+            .single();
+
+          const { data: selectedParty } = await supabase
+            .from("parties")
+            .select("title")
+            .eq("id", selectedPartyForScan)
+            .single();
+
+          console.log("❌ Party mismatch!");
+          console.log("  Ticket is for:", qrParty?.title);
+          console.log("  Scanning for:", selectedParty?.title);
+
           setScanResult({
             success: false,
-            message: "This ticket is not for the selected party",
+            message: `This ticket is for "${qrParty?.title}" not "${selectedParty?.title}"`,
           });
-          setTimeout(() => {
-            setScanning(false);
-          }, 3000);
+          setTimeout(() => setScanning(false), 3000);
           return;
         }
+
+        console.log("✅ Party verification passed!");
       }
 
-      // Call check-in function
-      const { data: result, error } = await supabase.rpc("check_in_ticket", {
-        ticket_id_param: ticketId,
-        host_id_param: user?.id,
-      });
+      // ✅ VERIFY TICKET EXISTS AND IS VALID
+      const { data: ticket, error: ticketError } = await supabase
+        .from("tickets")
+        .select("payment_status, quantity_purchased, quantity_used")
+        .eq("id", ticketId)
+        .single();
 
-      if (error) throw error;
+      if (ticketError || !ticket) {
+        console.error("❌ Ticket not found:", ticketError);
+        setScanResult({
+          success: false,
+          message: "Ticket not found in database",
+        });
+        setTimeout(() => setScanning(false), 3000);
+        return;
+      }
 
+      // Check payment status
+      if (ticket.payment_status !== "completed") {
+        console.log("❌ Ticket payment not completed");
+        setScanResult({
+          success: false,
+          message: "Ticket payment not completed",
+        });
+        setTimeout(() => setScanning(false), 3000);
+        return;
+      }
+
+      // Check if ticket is already fully used
+      if (ticket.quantity_used >= ticket.quantity_purchased) {
+        console.log("❌ Ticket fully used");
+        setScanResult({
+          success: false,
+          message: "All entries for this ticket have been used",
+        });
+        setTimeout(() => setScanning(false), 3000);
+        return;
+      }
+
+      // ✅ CALL CHECK-IN FUNCTION
+      console.log("📞 Calling check_in_ticket RPC...");
+      const { data: result, error: rpcError } = await supabase.rpc(
+        "check_in_ticket",
+        {
+          ticket_id_param: ticketId,
+          host_id_param: user?.id,
+        },
+      );
+
+      if (rpcError) {
+        console.error("❌ RPC error:", rpcError);
+        throw rpcError;
+      }
+
+      console.log("✅ Check-in result:", result);
       setScanResult(result);
-
-      // Play sound/vibration based on result
-      if (result.success) {
-        // Success feedback
-      } else {
-        // Error feedback
-      }
-    } catch (error) {
-      console.error("Scan error:", error);
+    } catch (error: any) {
+      console.error("❌ Scan error:", error);
       setScanResult({
         success: false,
-        message: "Failed to validate ticket",
+        message: error.message || "Failed to validate ticket",
       });
     } finally {
       setTimeout(() => {
