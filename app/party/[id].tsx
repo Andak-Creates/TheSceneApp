@@ -25,6 +25,7 @@ interface Party {
   description: string | null;
   flyer_url: string;
   date: string;
+  end_date: string | null;
   location: string;
   city: string;
   ticket_price: number;
@@ -311,6 +312,12 @@ export default function PartyDetailScreen() {
   // ✅ CALCULATE REMAINING FROM TIERS
   const ticketsRemaining = totalTickets - totalSold;
   const displayPrice = ticketTiers.length > 0 ? minPrice : party.ticket_price;
+  // ✅ Check if event is over
+  const now = new Date();
+  const eventEndTime = party.end_date
+    ? new Date(party.end_date)
+    : new Date(party.date);
+  const eventEnded = now > eventEndTime;
 
   return (
     <View className="flex-1 bg-[#191022]">
@@ -555,17 +562,22 @@ export default function PartyDetailScreen() {
       {/* Fixed Get Tickets Button */}
       <View className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-[#191022] to-transparent">
         <TouchableOpacity
+          disabled={eventEnded}
           onPress={() =>
+            !eventEnded &&
             router.push({
               pathname: "/party/[id]/tickets",
               params: { id: partyId },
             })
           }
-          className="bg-purple-600 py-4 rounded-xl items-center"
+          className={`py-4 rounded-xl items-center ${
+            eventEnded ? "bg-gray-700" : "bg-purple-600"
+          }`}
         >
           <Text className="text-white font-bold text-lg">
-            Get Tickets • {ticketTiers.length > 1 ? "From " : ""}₦
-            {displayPrice.toLocaleString()}
+            {eventEnded
+              ? "This event has ended"
+              : `Get Tickets • ${ticketTiers.length > 1 ? "From " : ""}₦${displayPrice.toLocaleString()}`}
           </Text>
         </TouchableOpacity>
       </View>

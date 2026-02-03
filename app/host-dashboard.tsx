@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -74,6 +74,7 @@ export default function HostDashboardScreen() {
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
+  const scanLock = useRef(false);
 
   // ✅ ADD PARTY SELECTION FOR SCANNER
   const [selectedPartyForScan, setSelectedPartyForScan] = useState<
@@ -181,17 +182,18 @@ export default function HostDashboardScreen() {
   };
 
   const handleBarCodeScanned = async ({ data }: { data: string }) => {
-    if (scanning) return;
-
+    if (scanLock.current) return;
+    scanLock.current = true;
     setScanning(true);
 
     try {
-      console.log("📱 QR Code scanned:", data);
+      console.log("📱 RAW QR Code data:", data);
 
       // Parse QR code data
       let qrData;
       try {
         qrData = JSON.parse(data);
+        console.log("📦 Parsed QR data:", JSON.stringify(qrData, null, 2));
       } catch (parseError) {
         console.error("❌ Failed to parse QR code:", parseError);
         setScanResult({
@@ -202,9 +204,11 @@ export default function HostDashboardScreen() {
         return;
       }
 
-      const { ticketId, partyId } = qrData; // ✅ Get partyId from QR code
-      console.log("🎫 Ticket ID:", ticketId);
-      console.log("🎉 Party ID from QR:", partyId);
+      const { ticketId, partyId, userId } = qrData;
+      console.log("🎫 Extracted values:");
+      console.log("  ticketId:", ticketId, "type:", typeof ticketId);
+      console.log("  partyId:", partyId, "type:", typeof partyId);
+      console.log("  userId:", userId, "type:", typeof userId);
 
       if (!ticketId) {
         setScanResult({
@@ -219,14 +223,12 @@ export default function HostDashboardScreen() {
       if (selectedPartyForScan) {
         console.log("🔍 Selected party for scan:", selectedPartyForScan);
 
-        // Compare the partyId from QR code with selected party
         const qrPartyId = String(partyId);
         const selectedPartyId = String(selectedPartyForScan);
 
         console.log("🔍 Comparing:", { qrPartyId, selectedPartyId });
 
         if (qrPartyId !== selectedPartyId) {
-          // Get party names for better error message
           const { data: qrParty } = await supabase
             .from("parties")
             .select("title")
@@ -254,22 +256,52 @@ export default function HostDashboardScreen() {
         console.log("✅ Party verification passed!");
       }
 
-      // ✅ VERIFY TICKET EXISTS AND IS VALID
-      const { data: ticket, error: ticketError } = await supabase
-        .from("tickets")
-        .select("payment_status, quantity_purchased, quantity_used")
-        .eq("id", ticketId)
-        .single();
+      // ✅ FIRST: CHECK IF TICKET EXISTS AT ALL
+      console.log("🔍 Looking up ticket with ID:", ticketId);
 
-      if (ticketError || !ticket) {
-        console.error("❌ Ticket not found:", ticketError);
+      const { data: ticketCheck, error: checkError } = await supabase
+        .from("tickets")
+        .select("*")
+        .eq("id", ticketId);
+
+      console.log("📊 Ticket lookup result:");
+      console.log("  Found tickets:", ticketCheck?.length || 0);
+      if (ticketCheck && ticketCheck.length > 0) {
+        console.log("  Ticket data:", JSON.stringify(ticketCheck[0], null, 2));
+      }
+      console.log("  Error:", checkError);
+
+      // If no ticket found, try to help debug
+      if (!ticketCheck || ticketCheck.length === 0) {
+        console.log("❌ No ticket found with this ID");
+
+        // Check if ANY tickets exist for this party
+        const { data: partyTickets, error: partyError } = await supabase
+          .from("tickets")
+          .select("id, user_id, party_id")
+          .eq("party_id", partyId)
+          .limit(5);
+
+        console.log(
+          "📋 Sample tickets for this party:",
+          partyTickets?.length || 0,
+        );
+        if (partyTickets && partyTickets.length > 0) {
+          console.log(
+            "  Sample IDs:",
+            partyTickets.map((t) => t.id.substring(0, 8)),
+          );
+        }
+
         setScanResult({
           success: false,
-          message: "Ticket not found in database",
+          message: `Ticket not found. ID: ${ticketId.substring(0, 8)}...`,
         });
         setTimeout(() => setScanning(false), 3000);
         return;
       }
+
+      const ticket = ticketCheck[0];
 
       // Check payment status
       if (ticket.payment_status !== "completed") {
@@ -287,11 +319,16 @@ export default function HostDashboardScreen() {
         console.log("❌ Ticket fully used");
         setScanResult({
           success: false,
-          message: "All entries for this ticket have been used",
+          message: `All ${ticket.quantity_purchased} entries have been used`,
         });
-        setTimeout(() => setScanning(false), 3000);
+        setTimeout(() => setScanning(false), 5000);
         return;
       }
+
+      console.log("✅ Ticket is valid! Proceeding to check-in...");
+      console.log(
+        `  Usage: ${ticket.quantity_used}/${ticket.quantity_purchased}`,
+      );
 
       // ✅ CALL CHECK-IN FUNCTION
       console.log("📞 Calling check_in_ticket RPC...");
@@ -319,7 +356,8 @@ export default function HostDashboardScreen() {
     } finally {
       setTimeout(() => {
         setScanning(false);
-      }, 3000);
+        scanLock.current = false; // 🔓 unlock scanner
+      }, 3000); // 3 seconds is
     }
   };
 
@@ -529,7 +567,10 @@ export default function HostDashboardScreen() {
         <CameraView
           style={{ flex: 1 }}
           facing="back"
-          onBarcodeScanned={scanning ? undefined : handleBarCodeScanned}
+          // ✅ ONLY SCAN WHEN NOT ALREADY SCANNING AND NO RESULT SHOWING
+          onBarcodeScanned={
+            scanning || scanResult ? undefined : handleBarCodeScanned
+          }
         >
           {/* Scanner Overlay */}
           <View className="flex-1 bg-black/50">
@@ -539,13 +580,34 @@ export default function HostDashboardScreen() {
                 Scan Ticket QR Code
               </Text>
               <Text className="text-gray-300 text-center">
-                Position the QR code within the frame
+                {scanResult
+                  ? "Check result below"
+                  : scanning
+                    ? "Processing..."
+                    : "Position QR code in frame"}
               </Text>
             </View>
 
             {/* Scanner Frame */}
             <View className="flex-1 items-center justify-center">
-              <View className="w-72 h-72 border-4 border-purple-500 rounded-3xl" />
+              <View
+                className={`w-72 h-72 border-4 rounded-3xl ${
+                  scanResult
+                    ? scanResult.success
+                      ? "border-green-500"
+                      : "border-red-500"
+                    : scanning
+                      ? "border-yellow-500"
+                      : "border-purple-500"
+                }`}
+              />
+
+              {/* ✅ SCANNING INDICATOR */}
+              {scanning && !scanResult && (
+                <View className="absolute">
+                  <ActivityIndicator size="large" color="#fff" />
+                </View>
+              )}
             </View>
 
             {/* Result Display */}
@@ -565,42 +627,64 @@ export default function HostDashboardScreen() {
                       color="#fff"
                     />
                     <Text className="text-white text-xl font-bold ml-3">
-                      {scanResult.success ? "Valid Ticket" : "Invalid"}
+                      {scanResult.success ? "✓ Valid Ticket" : "✗ Invalid"}
                     </Text>
                   </View>
 
                   {scanResult.success ? (
                     <>
-                      <Text className="text-white text-base mb-1">
+                      <Text className="text-white text-lg font-bold mb-2">
                         {scanResult.buyer_name}
                       </Text>
-                      <Text className="text-white/80 text-lg font-bold">
-                        Ticket {scanResult.scan_number}/
+                      <Text className="text-white/90 text-base mb-1">
+                        Entry {scanResult.scan_number} of{" "}
                         {scanResult.total_tickets}
                       </Text>
                       {scanResult.remaining! > 0 && (
-                        <Text className="text-white/80 text-sm mt-2">
-                          {scanResult.remaining} more can enter with this ticket
+                        <Text className="text-white/80 text-sm mt-2 mb-3">
+                          💡 {scanResult.remaining} more{" "}
+                          {scanResult.remaining === 1 ? "entry" : "entries"}{" "}
+                          remaining on this ticket
+                        </Text>
+                      )}
+                      {scanResult.remaining === 0 && (
+                        <Text className="text-white/80 text-sm mt-2 mb-3">
+                          ⚠️ This was the last entry for this ticket
                         </Text>
                       )}
                     </>
                   ) : (
-                    <Text className="text-white text-base">
+                    <Text className="text-white text-base mb-3">
                       {scanResult.message}
                     </Text>
                   )}
 
+                  {/* ✅ READY FOR NEXT SCAN BUTTON */}
                   <TouchableOpacity
-                    className="bg-white/20 py-3 rounded-xl mt-4"
+                    className="bg-white/30 py-4 rounded-xl mt-2"
                     onPress={() => {
                       setScanResult(null);
                       setScanning(false);
                     }}
                   >
-                    <Text className="text-white text-center font-semibold">
-                      Scan Next
+                    <Text className="text-white text-center font-bold text-base">
+                      ✓ Ready for Next Scan
                     </Text>
                   </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* ✅ INSTRUCTION OVERLAY WHEN IDLE */}
+            {!scanning && !scanResult && (
+              <View className="absolute bottom-0 left-0 right-0 p-6">
+                <View className="bg-purple-600/90 rounded-2xl p-6">
+                  <Text className="text-white text-center text-base font-semibold mb-2">
+                    📱 Point camera at QR code
+                  </Text>
+                  <Text className="text-white/80 text-center text-sm">
+                    Scanning will happen automatically when QR code is detected
+                  </Text>
                 </View>
               </View>
             )}

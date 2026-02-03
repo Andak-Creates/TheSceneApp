@@ -190,6 +190,8 @@ export default function CreatePartyScreen() {
         if (!city.trim()) return "Please enter the city";
         if (!startDate.trim()) return "Please enter start date";
         if (!startTime.trim()) return "Please enter start time";
+        if (!endDate.trim()) return "Please enter end date";
+        if (!endTime.trim()) return "Please enter end time";
         break;
       case 3:
         if (selectedGenres.length === 0)
@@ -258,6 +260,23 @@ export default function CreatePartyScreen() {
 
       const partyDateTimeISO = partyDateTime.toISOString();
 
+      // ✅ Create END date object
+      const endDateTimeString = `${endDate}T${endTime}:00`;
+      const partyEndDateTime = new Date(endDateTimeString);
+
+      // ❌ Stop if invalid
+      if (isNaN(partyEndDateTime.getTime())) {
+        throw new Error("Invalid end date or time");
+      }
+
+      // ❌ Stop if end is before start
+      if (partyEndDateTime <= partyDateTime) {
+        throw new Error("End time must be after start time");
+      }
+
+      // ✅ Convert to ISO for Supabase
+      const partyEndDateTimeISO = partyEndDateTime.toISOString();
+
       // 3. Calculate totals from tiers
       const lowestPrice = Math.min(
         ...ticketTiers.map((t) => parseFloat(t.price)),
@@ -276,6 +295,7 @@ export default function CreatePartyScreen() {
           description: description.trim() || null,
           flyer_url: publicUrl,
           date: partyDateTimeISO,
+          end_date: partyEndDateTimeISO,
           location: location.trim(),
           city: city.trim(),
           ticket_price: lowestPrice,
@@ -545,7 +565,7 @@ export default function CreatePartyScreen() {
             {/* End Date & Time (Optional) */}
             <View className="mb-4">
               <Text className="text-white text-sm font-semibold mb-2">
-                End Date & Time (Optional)
+                End Date & Time *
               </Text>
               <View className="flex-row gap-3">
                 {/* End Date Input */}

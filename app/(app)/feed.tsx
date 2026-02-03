@@ -19,6 +19,7 @@ interface Party {
   description: string | null;
   flyer_url: string;
   date: string;
+  end_date: string | null;
   location: string;
   city: string;
   ticket_price: number;
@@ -68,7 +69,10 @@ export default function FeedScreen() {
         `,
         )
         .eq("is_published", true)
-        .order("created_at", { ascending: false })
+        .or(
+          `end_date.gt.${new Date().toISOString()},and(end_date.is.null,date.gt.${new Date().toISOString()})`,
+        )
+        .order("date", { ascending: true })
         .limit(20);
 
       if (partiesError) throw partiesError;
@@ -197,148 +201,163 @@ export default function FeedScreen() {
     return `${displayHours}:${displayMinutes} ${ampm}`;
   };
 
-  const renderPartyCard = ({ item: party }: { item: Party }) => (
-    <View className="mb-4 bg-[#191022] pb-6 border-b border-white/10">
-      {/* Host Header */}
-      <TouchableOpacity
-        className="flex-row items-center px-4 py-3"
-        onPress={() =>
-          router.push({
-            pathname: "/host/[id]",
-            params: { id: party.host_id },
-          })
-        }
-      >
-        {party.host?.avatar_url ? (
-          <Image
-            source={{ uri: party.host.avatar_url }}
-            className="w-10 h-10 rounded-full"
-          />
-        ) : (
-          <View className="w-10 h-10 rounded-full bg-purple-600 items-center justify-center">
-            <Text className="text-white font-bold">
-              {party.host?.username.charAt(0).toUpperCase()}
-            </Text>
-          </View>
-        )}
-        <View className="ml-3 flex-1">
-          <Text className="text-white font-semibold">
-            {party.host?.username}
-          </Text>
-          <Text className="text-gray-500 text-xs">
-            {formatDate(party.created_at)}
-          </Text>
-        </View>
-        {party.host?.is_host && (
-          <View className="bg-purple-600/20 px-2 py-1 rounded-full">
-            <Text className="text-purple-400 text-xs font-bold">HOST</Text>
-          </View>
-        )}
-      </TouchableOpacity>
-
-      {/* Party Flyer */}
-      <TouchableOpacity
-        activeOpacity={0.9}
-        onPress={() =>
-          router.push({
-            pathname: "/party/[id]",
-            params: { id: party.id },
-          })
-        }
-      >
-        <Image
-          source={{ uri: party.flyer_url }}
-          className="w-full"
-          style={{ aspectRatio: 4 / 5 }}
-          resizeMode="cover"
-        />
-      </TouchableOpacity>
-
-      {/* Engagement Bar */}
-      <View className="flex-row items-center px-4 py-3">
+  const renderPartyCard = ({ item: party }: { item: Party }) => {
+    const now = new Date();
+    const eventEndTime = party.end_date
+      ? new Date(party.end_date)
+      : new Date(party.date);
+    const eventEnded = now > eventEndTime;
+    return (
+      <View className="mb-4 bg-[#191022] pb-6 border-b border-white/10">
+        {/* Host Header */}
         <TouchableOpacity
-          className="flex-row items-center mr-4"
-          onPress={() => handleLike(party.id)}
-        >
-          <Ionicons
-            name={party.is_liked ? "heart" : "heart-outline"}
-            size={26}
-            color={party.is_liked ? "#ef4444" : "#fff"}
-          />
-          <Text className="text-white ml-1 font-semibold">
-            {party.likes_count}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity className="flex-row items-center mr-4">
-          <Ionicons name="chatbubble-outline" size={24} color="#fff" />
-          <Text className="text-white ml-1 font-semibold">
-            {party.comments_count}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity className="flex-row items-center mr-auto">
-          <Ionicons name="repeat-outline" size={26} color="#fff" />
-        </TouchableOpacity>
-
-        <TouchableOpacity>
-          <Ionicons name="bookmark-outline" size={24} color="#fff" />
-        </TouchableOpacity>
-      </View>
-
-      {/* Party Info */}
-      <View className="px-4 pb-3">
-        <Text className="text-white text-lg font-bold mb-1">{party.title}</Text>
-
-        {party.description && (
-          <Text className="text-gray-300 text-sm mb-2" numberOfLines={2}>
-            {party.description}
-          </Text>
-        )}
-
-        <View className="flex-row items-center mb-1">
-          <Ionicons name="calendar-outline" size={14} color="#9ca3af" />
-          <Text className="text-gray-400 text-sm ml-1">
-            {formatDate(party.date)} • {formatTime(party.date)}
-          </Text>
-        </View>
-
-        <View className="flex-row items-center mb-2">
-          <Ionicons name="location-outline" size={14} color="#9ca3af" />
-          <Text className="text-gray-400 text-sm ml-1">
-            {party.location}, {party.city}
-          </Text>
-        </View>
-
-        {/* Music Genres */}
-        <View className="flex-row flex-wrap gap-2 mb-3">
-          {party.music_genres.slice(0, 3).map((genre) => (
-            <View
-              key={genre}
-              className="bg-purple-600/20 px-2 py-1 rounded-full"
-            >
-              <Text className="text-purple-300 text-xs">{genre}</Text>
-            </View>
-          ))}
-        </View>
-
-        {/* Get Tickets Button */}
-        <TouchableOpacity
-          className="bg-purple-600 py-3 rounded-xl items-center"
+          className="flex-row items-center px-4 py-3"
           onPress={() =>
             router.push({
-              pathname: "/party/[id]/tickets",
+              pathname: "/host/[id]",
+              params: { id: party.host_id },
+            })
+          }
+        >
+          {party.host?.avatar_url ? (
+            <Image
+              source={{ uri: party.host.avatar_url }}
+              className="w-10 h-10 rounded-full"
+            />
+          ) : (
+            <View className="w-10 h-10 rounded-full bg-purple-600 items-center justify-center">
+              <Text className="text-white font-bold">
+                {party.host?.username.charAt(0).toUpperCase()}
+              </Text>
+            </View>
+          )}
+          <View className="ml-3 flex-1">
+            <Text className="text-white font-semibold">
+              {party.host?.username}
+            </Text>
+            <Text className="text-gray-500 text-xs">
+              {formatDate(party.created_at)}
+            </Text>
+          </View>
+          {party.host?.is_host && (
+            <View className="bg-purple-600/20 px-2 py-1 rounded-full">
+              <Text className="text-purple-400 text-xs font-bold">HOST</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+
+        {/* Party Flyer */}
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() =>
+            router.push({
+              pathname: "/party/[id]",
               params: { id: party.id },
             })
           }
         >
-          <Text className="text-white font-bold text-base">
-            Get Tickets • ₦{party.ticket_price.toLocaleString()}
-          </Text>
+          <Image
+            source={{ uri: party.flyer_url }}
+            className="w-full"
+            style={{ aspectRatio: 4 / 5 }}
+            resizeMode="cover"
+          />
         </TouchableOpacity>
+
+        {/* Engagement Bar */}
+        <View className="flex-row items-center px-4 py-3">
+          <TouchableOpacity
+            className="flex-row items-center mr-4"
+            onPress={() => handleLike(party.id)}
+          >
+            <Ionicons
+              name={party.is_liked ? "heart" : "heart-outline"}
+              size={26}
+              color={party.is_liked ? "#ef4444" : "#fff"}
+            />
+            <Text className="text-white ml-1 font-semibold">
+              {party.likes_count}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity className="flex-row items-center mr-4">
+            <Ionicons name="chatbubble-outline" size={24} color="#fff" />
+            <Text className="text-white ml-1 font-semibold">
+              {party.comments_count}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity className="flex-row items-center mr-auto">
+            <Ionicons name="repeat-outline" size={26} color="#fff" />
+          </TouchableOpacity>
+
+          <TouchableOpacity>
+            <Ionicons name="bookmark-outline" size={24} color="#fff" />
+          </TouchableOpacity>
+        </View>
+
+        {/* Party Info */}
+        <View className="px-4 pb-3">
+          <Text className="text-white text-lg font-bold mb-1">
+            {party.title}
+          </Text>
+
+          {party.description && (
+            <Text className="text-gray-300 text-sm mb-2" numberOfLines={2}>
+              {party.description}
+            </Text>
+          )}
+
+          <View className="flex-row items-center mb-1">
+            <Ionicons name="calendar-outline" size={14} color="#9ca3af" />
+            <Text className="text-gray-400 text-sm ml-1">
+              {formatDate(party.date)} • {formatTime(party.date)}
+            </Text>
+          </View>
+
+          <View className="flex-row items-center mb-2">
+            <Ionicons name="location-outline" size={14} color="#9ca3af" />
+            <Text className="text-gray-400 text-sm ml-1">
+              {party.location}, {party.city}
+            </Text>
+          </View>
+
+          {/* Music Genres */}
+          <View className="flex-row flex-wrap gap-2 mb-3">
+            {party.music_genres.slice(0, 3).map((genre) => (
+              <View
+                key={genre}
+                className="bg-purple-600/20 px-2 py-1 rounded-full"
+              >
+                <Text className="text-purple-300 text-xs">{genre}</Text>
+              </View>
+            ))}
+          </View>
+
+          {/* Get Tickets Button */}
+          <TouchableOpacity
+            disabled={eventEnded}
+            className={`py-3 rounded-xl items-center ${
+              eventEnded ? "bg-gray-700" : "bg-purple-600"
+            }`}
+            onPress={() =>
+              !eventEnded &&
+              router.push({
+                pathname: "/party/[id]/tickets",
+                params: { id: party.id },
+              })
+            }
+          >
+            <Text className="text-white font-bold text-base">
+              {eventEnded
+                ? "Event Ended"
+                : `Get Tickets • ₦${party.ticket_price.toLocaleString()}`}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
-    </View>
-  );
+    );
+  };
 
   if (loading) {
     return (
