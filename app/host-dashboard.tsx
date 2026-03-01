@@ -3,13 +3,14 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Image,
-  RefreshControl,
-  ScrollView,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Image,
+    RefreshControl,
+    ScrollView,
+    Text,
+    TouchableOpacity,
+    View
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import { useAuthStore } from "../stores/authStore";
@@ -27,6 +28,7 @@ interface Party {
   ticket_price: number;
   ticket_quantity: number;
   tickets_sold: number;
+  date_tba?: boolean;
 }
 
 // ✅ ADD TIER INFO TO PARTY
@@ -42,6 +44,26 @@ interface Analytics {
   totalParties: number;
   averageRating: number;
   upcomingParties: number;
+}
+
+interface HostBalance {
+  total_earned: number;
+  total_withdrawn: number;
+  current_balance: number;
+  pending_payout: number;
+  currency: string;
+}
+
+interface EarningLog {
+  id: string;
+  amount: number;
+  fee_amount: number;
+  net_amount: number;
+  currency: string;
+  created_at: string;
+  party: {
+    title: string;
+  };
 }
 
 interface ScanResult {
@@ -71,9 +93,13 @@ export default function HostDashboardScreen() {
   });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [balance, setBalance] = useState<HostBalance | null>(null);
+  const [logs, setLogs] = useState<EarningLog[]>([]);
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
   const scanLock = useRef(false);
 
   // ✅ ADD PARTY SELECTION FOR SCANNER
@@ -139,7 +165,7 @@ export default function HostDashboardScreen() {
         0,
       );
       const upcomingCount = partiesWithTiers.filter(
-        (p) => new Date(p.date) >= new Date(),
+        (p) => p.date_tba || new Date(p.date) >= new Date(),
       ).length;
 
       // Get reviews
@@ -161,9 +187,41 @@ export default function HostDashboardScreen() {
         upcomingParties: upcomingCount,
       });
 
+      // ✅ FETCH BALANCE
+      const { data: balanceData } = await supabase
+        .from("host_balances")
+        .select("*")
+        .eq("user_id", user.id)
+        .single();
+      
+      setBalance(balanceData || { total_earned: 0, total_withdrawn: 0, current_balance: 0, pending_payout: 0, currency: "NGN" });
+
+      // Fetch isAdmin status
+      if (user) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("is_admin")
+          .eq("id", user.id)
+          .single();
+        if (profile) setIsAdmin(profile.is_admin);
+      }
+
+      // ✅ FETCH EARNINGS LOGS
+      const { data: logsData } = await supabase
+        .from("host_earnings_logs")
+        .select(`
+          *,
+          party:parties(title)
+        `)
+        .eq("host_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(10);
+      
+      setLogs(logsData || []);
+
       // ✅ AUTO-SELECT FIRST UPCOMING PARTY FOR SCANNER
       const upcomingParties = partiesWithTiers.filter(
-        (p) => new Date(p.date) >= new Date(),
+        (p) => p.date_tba || new Date(p.date) >= new Date(),
       );
       if (upcomingParties.length > 0 && !selectedPartyForScan) {
         setSelectedPartyForScan(upcomingParties[0].id);
@@ -174,6 +232,96 @@ export default function HostDashboardScreen() {
       setLoading(false);
       setRefreshing(false);
     }
+  };
+
+  const handleWithdraw = async () => {
+    if (!balance || balance.current_balance <= 0) {
+      Alert.alert("Error", "You have no balance to withdraw.");
+      return;
+    }
+
+    // Check host verification - unverified hosts cannot withdraw
+    const { data: profileRow } = await supabase
+      .from("profiles")
+      .select("host_verified_at, host_verification_status")
+      .eq("id", user?.id)
+      .single();
+
+    const isVerified = profileRow?.host_verified_at || profileRow?.host_verification_status === "approved";
+
+    if (!isVerified) {
+      const { data: verification } = await supabase
+        .from("host_verifications")
+        .select("status")
+        .eq("user_id", user?.id)
+        .maybeSingle();
+
+      if (verification?.status !== "approved") {
+        Alert.alert(
+          "Verification Required",
+          "You must complete host verification before withdrawing. Unverified hosts can withdraw only after their events and admin approval.",
+          [
+            { text: "OK", style: "cancel" },
+            { text: "Verify", onPress: () => router.push("/(app)/host-verification") },
+          ]
+        );
+        return;
+      }
+    }
+
+    // Check if bank account exists
+    const { data: bankAccount } = await supabase
+      .from("host_bank_accounts")
+      .select("id")
+      .eq("user_id", user?.id)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (!bankAccount) {
+      Alert.alert(
+        "Bank Detail Missing",
+        "Please add your bank account details first.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Add Bank", onPress: () => router.push("/host/bank-account") }
+        ]
+      );
+      return;
+    }
+
+    Alert.alert(
+      "Confirm Withdrawal",
+      `Are you sure you want to withdraw ${formatCurrency(balance.current_balance, balance.currency)}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { 
+          text: "Withdraw", 
+          onPress: async () => {
+            setWithdrawing(true);
+            try {
+              const { error } = await supabase
+                .from("withdrawal_requests")
+                .insert({
+                  host_id: user?.id,
+                  bank_account_id: bankAccount.id,
+                  amount: balance.current_balance,
+                  currency: balance.currency,
+                  status: 'pending'
+                });
+
+              if (error) throw error;
+              Alert.alert("Success", "Withdrawal request submitted for approval.");
+              handleRefresh();
+            } catch (err) {
+              console.error("Withdrawal error:", err);
+              Alert.alert("Error", "Failed to submit withdrawal request.");
+            } finally {
+              setWithdrawing(false);
+            }
+          }
+        }
+      ]
+    );
   };
 
   const handleRefresh = () => {
@@ -372,9 +520,11 @@ export default function HostDashboardScreen() {
 
   const renderPartiesTab = () => {
     const upcomingParties = parties.filter(
-      (p) => new Date(p.date) >= new Date(),
+      (p) => p.date_tba || (p.date && new Date(p.date) >= new Date()),
     );
-    const pastParties = parties.filter((p) => new Date(p.date) < new Date());
+    const pastParties = parties.filter(
+      (p) => !p.date_tba && p.date && new Date(p.date) < new Date(),
+    );
 
     return (
       <ScrollView
@@ -441,9 +591,12 @@ export default function HostDashboardScreen() {
           ))}
 
           {upcomingParties.length === 0 && (
-            <View className="items-center py-12">
-              <Ionicons name="calendar-outline" size={48} color="#666" />
-              <Text className="text-gray-400 mt-3">No upcoming parties</Text>
+            <View className="items-center py-16 bg-white/5 rounded-3xl border border-white/5 border-dashed">
+              <View className="w-16 h-16 rounded-full bg-white/5 items-center justify-center mb-4">
+                <Ionicons name="calendar-outline" size={32} color="#444" />
+              </View>
+              <Text className="text-gray-400 font-bold">No upcoming parties</Text>
+              <Text className="text-gray-600 text-xs mt-1">Time to host your next vibe!</Text>
             </View>
           )}
         </View>
@@ -508,7 +661,7 @@ export default function HostDashboardScreen() {
     }
 
     const upcomingParties = parties.filter(
-      (p) => new Date(p.date) >= new Date(),
+      (p) => p.date_tba || (p.date && new Date(p.date) >= new Date()),
     );
     const selectedParty = parties.find((p) => p.id === selectedPartyForScan);
 
@@ -694,6 +847,17 @@ export default function HostDashboardScreen() {
     );
   };
 
+  const formatCurrency = (amount: number, code: string) => {
+    const symbols: Record<string, string> = {
+      NGN: "₦", USD: "$", GBP: "£", EUR: "€", GHS: "₵",
+      KES: "KSh", ZAR: "R", AUD: "A$", CAD: "CA$",
+    };
+    const symbol = symbols[code] || code + " ";
+    return `${symbol}${(amount || 0).toLocaleString()}`;
+  };
+
+
+
   const renderAnalyticsTab = () => (
     <ScrollView
       className="flex-1"
@@ -706,45 +870,146 @@ export default function HostDashboardScreen() {
       }
     >
       <View className="px-6 py-6">
-        {/* Stats Cards */}
-        <View className="bg-purple-600 rounded-2xl p-6 mb-4">
-          <Text className="text-purple-200 text-sm mb-1">Total Revenue</Text>
-          <Text className="text-white text-3xl font-bold">
-            ₦{analytics.totalRevenue.toLocaleString()}
+        {/* ✅ BALANCE CARD */}
+        <View
+          className="bg-purple-600 rounded-3xl p-6 mb-6 shadow-lg shadow-purple-600/20"
+          style={{
+            shadowColor: "#8B5CF6",
+            shadowOffset: { width: 0, height: 10 },
+            shadowOpacity: 0.2,
+            shadowRadius: 20,
+            elevation: 10,
+          }}
+        >
+          <Text className="text-purple-200 text-sm font-semibold mb-1">
+            Available Balance
           </Text>
+          <Text className="text-white text-4xl font-bold mb-4">
+            {balance ? formatCurrency(balance.current_balance, balance.currency) : "₦0"}
+          </Text>
+
+          {balance && balance.pending_payout > 0 && (
+            <View className="mb-4 bg-white/10 border border-white/20 rounded-xl p-3 flex-row items-center">
+              <Ionicons name="time" size={16} color="#fff" />
+              <Text className="text-white text-xs ml-2 font-medium">
+                Pending Payout: {formatCurrency(balance.pending_payout, balance.currency)}
+              </Text>
+            </View>
+          )}
+
+          <View className="flex-row gap-3">
+            <TouchableOpacity
+              onPress={handleWithdraw}
+              disabled={!balance || balance.current_balance <= 0 || withdrawing}
+              className={`flex-1 py-4 rounded-2xl items-center flex-row justify-center ${
+                !balance || balance.current_balance <= 0 || withdrawing
+                  ? "bg-white/10 opacity-50"
+                  : "bg-white"
+              }`}
+            >
+              {withdrawing ? (
+                <ActivityIndicator color="#8B5CF6" size="small" />
+              ) : (
+                <>
+                  <Ionicons name="wallet" size={20} color="#8B5CF6" />
+                  <Text className="text-purple-600 font-bold ml-2">Withdraw</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => router.push("/host/bank-account")}
+              className="bg-white/10 w-14 h-14 rounded-2xl items-center justify-center border border-white/20"
+            >
+              <Ionicons name="business" size={24} color="#fff" />
+            </TouchableOpacity>
+          </View>
         </View>
 
-        <View className="flex-row gap-3 mb-4">
-          <View className="flex-1 bg-white/5 rounded-2xl p-4">
-            <Text className="text-gray-400 text-sm mb-1">Tickets Sold</Text>
-            <Text className="text-white text-2xl font-bold">
+        {/* ✅ ADMIN CONSOLE BUTTON (Only for Admins) */}
+        {isAdmin && (
+          <TouchableOpacity
+            onPress={() => router.push("/admin-console")}
+            className="mb-8 bg-red-500/10 border border-red-500/20 rounded-2xl p-4 flex-row justify-between items-center"
+          >
+            <View className="flex-row items-center">
+              <View className="bg-red-500/20 p-2 rounded-lg">
+                <Ionicons name="shield-checkmark" size={20} color="#ef4444" />
+              </View>
+              <View className="ml-3">
+                <Text className="text-white font-bold">Admin Console</Text>
+                <Text className="text-gray-400 text-xs text-red-500/70">Manage Payouts & System</Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#ef4444" />
+          </TouchableOpacity>
+        )}
+
+        {/* Stats Row */}
+        <View className="flex-row gap-4 mb-8">
+          <View className="flex-1 bg-white/5 p-4 rounded-2xl border border-white/10">
+            <Text className="text-gray-400 text-xs mb-1">Total Earned</Text>
+            <Text className="text-white font-bold text-lg">
+              {balance ? formatCurrency(balance.total_earned, balance.currency) : "₦0"}
+            </Text>
+          </View>
+          <View className="flex-1 bg-white/5 p-4 rounded-2xl border border-white/10">
+            <Text className="text-gray-400 text-xs mb-1">Tickets Sold</Text>
+            <Text className="text-white font-bold text-lg">
               {analytics.totalTicketsSold}
             </Text>
           </View>
+        </View>
+
+        <View className="flex-row gap-3 mb-6">
           <View className="flex-1 bg-white/5 rounded-2xl p-4">
-            <Text className="text-gray-400 text-sm mb-1">Total Parties</Text>
-            <Text className="text-white text-2xl font-bold">
+            <Text className="text-gray-400 text-xs mb-1">Total Parties</Text>
+            <Text className="text-white text-xl font-bold">
               {analytics.totalParties}
             </Text>
           </View>
-        </View>
-
-        <View className="flex-row gap-3 mb-4">
           <View className="flex-1 bg-white/5 rounded-2xl p-4">
-            <Text className="text-gray-400 text-sm mb-1">Avg Rating</Text>
+            <Text className="text-gray-400 text-xs mb-1">Avg Rating</Text>
             <View className="flex-row items-center">
-              <Text className="text-white text-2xl font-bold mr-1">
+              <Text className="text-white text-xl font-bold mr-1">
                 {analytics.averageRating.toFixed(1)}
               </Text>
-              <Ionicons name="star" size={20} color="#8B5CF6" />
+              <Ionicons name="star" size={16} color="#8B5CF6" />
             </View>
           </View>
-          <View className="flex-1 bg-white/5 rounded-2xl p-4">
-            <Text className="text-gray-400 text-sm mb-1">Upcoming</Text>
-            <Text className="text-white text-2xl font-bold">
-              {analytics.upcomingParties}
-            </Text>
+        </View>
+
+        {/* Sales History */}
+        <View className="mb-6">
+          <View className="flex-row justify-between items-center mb-4">
+            <Text className="text-white font-bold text-lg">Sales History</Text>
+            {logs.length > 0 && (
+              <TouchableOpacity onPress={() => router.push("/host/earnings")}>
+                <Text className="text-purple-400 text-sm">See All</Text>
+              </TouchableOpacity>
+            )}
           </View>
+
+          {logs.map((item) => (
+            <View key={item.id} className="mb-3 bg-white/5 p-4 rounded-2xl border border-white/5 flex-row justify-between items-center">
+              <View className="flex-1 mr-4">
+                <Text className="text-white font-bold mb-1" numberOfLines={1}>{item.party?.title}</Text>
+                <Text className="text-gray-400 text-[10px]">{formatDate(item.created_at)}</Text>
+              </View>
+              <View className="items-end">
+                <Text className="text-green-400 font-bold text-sm">
+                  +{formatCurrency(item.net_amount, item.currency)}
+                </Text>
+              </View>
+            </View>
+          ))}
+
+          {logs.length === 0 && (
+            <View className="bg-white/5 rounded-2xl p-8 items-center justify-center">
+              <Ionicons name="receipt-outline" size={32} color="#333" />
+              <Text className="text-gray-500 mt-2 text-sm">No sales yet</Text>
+            </View>
+          )}
         </View>
 
         {/* Quick Actions */}

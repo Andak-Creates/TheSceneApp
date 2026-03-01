@@ -1,5 +1,7 @@
 import { Session, User } from "@supabase/supabase-js";
 import { create } from "zustand";
+import { detectAndSaveRegionCurrency } from "../lib/currency";
+import { detectAndSaveUserLocation } from "../lib/location";
 import { supabase } from "../lib/supabase";
 
 interface AuthState {
@@ -70,7 +72,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (error) return { error };
       if (!data.user) return { error: new Error("No user returned") };
 
-      // Profile is created automatically by the trigger!
+      // Detect and save region currency and location
+      await Promise.all([
+        detectAndSaveRegionCurrency(data.user.id),
+        detectAndSaveUserLocation(data.user.id),
+      ]);
+
       return { error: null };
     } catch (error) {
       return { error };
@@ -79,12 +86,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   signIn: async (email: string, password: string) => {
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
-      return { error };
+      if (error) return { error };
+      if (data.user) {
+        await Promise.all([
+          detectAndSaveRegionCurrency(data.user.id),
+          detectAndSaveUserLocation(data.user.id),
+        ]);
+      }
+
+      return { error: null };
     } catch (error) {
       return { error };
     }

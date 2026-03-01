@@ -1,22 +1,26 @@
+import CurrencySelector from "@/components/CurrencySelector";
+import MediaGalleryUploader from "@/components/MediaGalleryUploader";
+import TBAToggle from "@/components/TBAToggle";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { decode } from "base64-arraybuffer";
-import * as ImagePicker from "expo-image-picker";
-import { useRouter } from "expo-router";
-import { useState } from "react";
+import { Image as ExpoImage } from "expo-image";
+import { router } from "expo-router";
+import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  ScrollView,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
+import { GooglePlacesAutocomplete } from "react-native-google-places-autocomplete";
+import { getUserCurrency } from "../../lib/currency";
+import { uploadPartyMedia } from "../../lib/media";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "../../stores/authStore";
 
@@ -63,16 +67,118 @@ interface TicketTier {
   quantity: string;
 }
 
+interface MediaItem {
+  uri: string;
+  type: "image" | "video";
+  order: number;
+  isPrimary: boolean;
+  uploading?: boolean;
+  uploadedUrl?: string;
+}
+
+// Helper for safe number parsing
+const safeParseFloat = (value: string): number => {
+  const parsed = parseFloat(value);
+  return isNaN(parsed) ? 0 : parsed;
+};
+
+const safeParseInt = (value: string): number => {
+  const parsed = parseInt(value, 10);
+  return isNaN(parsed) ? 0 : parsed;
+};
+
 export default function CreatePartyScreen() {
-  const router = useRouter();
   const { user } = useAuthStore();
 
   const [currentStep, setCurrentStep] = useState(1);
   const [publishing, setPublishing] = useState(false);
+  const [verificationChecked, setVerificationChecked] = useState(false);
+
+  // Check host verification before allowing party creation
+  useEffect(() => {
+    const checkVerification = async () => {
+      if (!user) return;
+      try {
+        const { data: profileRow } = await supabase
+          .from("profiles")
+          .select("host_verified_at, host_verification_status, is_host")
+          .eq("id", user.id)
+          .single();
+
+        const hasVerifiedProfile = profileRow?.host_verified_at || profileRow?.host_verification_status === "approved";
+
+        if (hasVerifiedProfile || profileRow?.is_host) {
+          setVerificationChecked(true);
+          return;
+        }
+
+        const { data: verification } = await supabase
+          .from("host_verifications")
+          .select("status")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (verification?.status === "approved" || hasVerifiedProfile) {
+          setVerificationChecked(true);
+          return;
+        }
+
+        router.replace("/(app)/host-verification");
+      } catch {
+        router.replace("/(app)/host-verification");
+      } finally {
+        setVerificationChecked(true);
+      }
+    };
+    checkVerification();
+  }, [user?.id]);
+
+  // Reset form on mount
+  useEffect(() => {
+    if (verificationChecked) resetForm();
+  }, [verificationChecked]);
+
+  const resetForm = async () => {
+    setCurrentStep(1);
+    setPublishing(false);
+    setFlyerImage(null);
+    setFlyerBase64(null);
+    setMediaGallery([]);
+    setTitle("");
+    setDescription("");
+    setStartDate("");
+    setStartTime("");
+    setEndDate("");
+    setEndTime("");
+    setLocation("");
+    setCity("");
+    setShowStartDatePicker(false);
+    setShowStartTimePicker(false);
+    setShowEndDatePicker(false);
+    setShowEndTimePicker(false);
+    setPriceTBA(false);
+    setDressCode("");
+    setSelectedGenres([]);
+    setSelectedVibes([]);
+    setTicketTiers([
+      { id: "1", name: "General Admission", price: "", quantity: "" },
+    ]);
+    
+    // Fetch and set user's preferred currency
+    if (user?.id) {
+      const preferredCurrency = await getUserCurrency(user.id);
+      setCurrency(preferredCurrency);
+    } else {
+      setCurrency("NGN");
+    }
+    
+    setError("");
+  };
 
   // Step 1: Visuals
-  const [flyerImage, setFlyerImage] = useState<string | null>(null);
+  const [flyerImage, setFlyerImage] = useState<string | null>(null); // Kept for backward compatibility display
   const [flyerBase64, setFlyerBase64] = useState<string | null>(null);
+  const [mediaGallery, setMediaGallery] = useState<MediaItem[]>([]);
 
   // Step 2: Basics
   const [title, setTitle] = useState("");
@@ -89,6 +195,14 @@ export default function CreatePartyScreen() {
   const [showEndTimePicker, setShowEndTimePicker] = useState(false);
   const [startDateTime, setStartDateTime] = useState(new Date());
   const [endDateTime, setEndDateTime] = useState(new Date());
+
+  // TBA toggles
+  const [dateTBA, setDateTBA] = useState(false);
+  const [locationTBA, setLocationTBA] = useState(false);
+  const [priceTBA, setPriceTBA] = useState(false);
+
+  // New optional fields
+  const [dressCode, setDressCode] = useState("");
 
   // Date helpers
   const formatDate = (date: Date) => {
@@ -114,33 +228,9 @@ export default function CreatePartyScreen() {
   const [ticketTiers, setTicketTiers] = useState<TicketTier[]>([
     { id: "1", name: "General Admission", price: "", quantity: "" },
   ]);
+  const [currency, setCurrency] = useState("NGN");
 
   const [error, setError] = useState("");
-
-  const pickFlyer = async () => {
-    try {
-      const permission =
-        await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert("Permission Required", "Please grant photo library access");
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        allowsEditing: true,
-        aspect: [4, 5],
-        quality: 0.8,
-        base64: true,
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        setFlyerImage(result.assets[0].uri);
-        setFlyerBase64(result.assets[0].base64 || null);
-      }
-    } catch (error) {
-      Alert.alert("Error", "Failed to pick image");
-    }
-  };
 
   const toggleGenre = (genre: string) => {
     setSelectedGenres((prev) =>
@@ -182,16 +272,23 @@ export default function CreatePartyScreen() {
   const validateStep = (step: number): string | null => {
     switch (step) {
       case 1:
-        if (!flyerImage) return "Please upload a party flyer";
+        if (mediaGallery.length === 0)
+          return "Please upload at least one image or video";
         break;
       case 2:
         if (!title.trim()) return "Please enter a party title";
-        if (!location.trim()) return "Please enter the location";
-        if (!city.trim()) return "Please enter the city";
-        if (!startDate.trim()) return "Please enter start date";
-        if (!startTime.trim()) return "Please enter start time";
-        if (!endDate.trim()) return "Please enter end date";
-        if (!endTime.trim()) return "Please enter end time";
+        if (!locationTBA && !location.trim())
+          return "Please enter the location or mark as TBA";
+        if (!locationTBA && !city.trim())
+          return "Please enter the city or mark as TBA";
+        if (!dateTBA) {
+          if (!startDate.trim())
+            return "Please enter start date or mark as TBA";
+          if (!startTime.trim())
+            return "Please enter start time or mark as TBA";
+          if (!endDate.trim()) return "Please enter end date or mark as TBA";
+          if (!endTime.trim()) return "Please enter end time or mark as TBA";
+        }
         break;
       case 3:
         if (selectedGenres.length === 0)
@@ -200,11 +297,16 @@ export default function CreatePartyScreen() {
           return "Please select at least one vibe";
         break;
       case 4:
-        for (const tier of ticketTiers) {
-          if (!tier.name.trim()) return "Please fill in all ticket tier names";
-          if (!tier.price.trim()) return "Please fill in all ticket prices";
-          if (!tier.quantity.trim() || parseInt(tier.quantity) <= 0)
-            return "Please fill in valid quantities";
+        if (!priceTBA) {
+          for (const tier of ticketTiers) {
+            if (!tier.name.trim())
+              return "Please fill in all ticket tier names";
+            // Check if price is a valid number string
+            if (!tier.price.trim() || isNaN(parseFloat(tier.price)))
+              return "Please fill in all ticket prices or mark as TBA";
+            if (!tier.quantity.trim() || parseInt(tier.quantity) <= 0)
+              return "Please fill in valid quantities";
+          }
         }
         break;
     }
@@ -227,64 +329,82 @@ export default function CreatePartyScreen() {
   };
 
   const handlePublish = async () => {
-    if (!user || !flyerBase64) return;
+    if (!user) return;
+
+    // Final check logic
+    if (mediaGallery.length === 0) {
+      setError("Please upload at least one image");
+      return;
+    }
 
     setPublishing(true);
     setError("");
 
     try {
-      // 1. Upload flyer
-      const fileExt = flyerImage?.split(".").pop() || "jpg";
-      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-      const filePath = `${user.id}/${fileName}`;
+      // 1. Upload All Media to Supabase Storage
+      const uploadedMedia = [];
+      const tempId = Date.now().toString(); // Temporary ID for folder structure
 
-      const { error: uploadError } = await supabase.storage
-        .from("flyers")
-        .upload(filePath, decode(flyerBase64), {
-          contentType: `image/${fileExt}`,
-        });
+      for (const item of mediaGallery) {
+        try {
+          const result = await uploadPartyMedia(user.id, item.uri, item.type);
+          uploadedMedia.push({
+            ...item,
+            uploadedUrl: result.url,
+          });
+        } catch (uploadError) {
+          console.error("Error uploading media item:", uploadError);
+          throw new Error("Failed to upload some media files. Please try again.");
+        }
+      }
 
-      if (uploadError) throw uploadError;
-
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from("flyers").getPublicUrl(filePath);
+      const primaryMedia = uploadedMedia.find((m) => m.isPrimary) || uploadedMedia[0];
+      const primaryUrl = primaryMedia?.uploadedUrl || "";
 
       // 2. Parse date and time
-      const dateTimeString = `${startDate}T${startTime}:00`;
-      const partyDateTime = new Date(dateTimeString);
+      let partyDateTimeISO = null;
+      let partyEndDateTimeISO = null;
 
-      if (isNaN(partyDateTime.getTime())) {
-        throw new Error("Invalid start date or time");
+      if (!dateTBA) {
+        const dateTimeString = `${startDate}T${startTime}:00`;
+        const partyDateTime = new Date(dateTimeString);
+
+        if (isNaN(partyDateTime.getTime())) {
+          throw new Error("Invalid start date or time");
+        }
+        partyDateTimeISO = partyDateTime.toISOString();
+
+        const endDateTimeString = `${endDate}T${endTime}:00`;
+        const partyEndDateTime = new Date(endDateTimeString);
+
+        if (isNaN(partyEndDateTime.getTime())) {
+          throw new Error("Invalid end date or time");
+        }
+        if (partyEndDateTime <= partyDateTime) {
+          throw new Error("End time must be after start time");
+        }
+        partyEndDateTimeISO = partyEndDateTime.toISOString();
       }
-
-      const partyDateTimeISO = partyDateTime.toISOString();
-
-      // ✅ Create END date object
-      const endDateTimeString = `${endDate}T${endTime}:00`;
-      const partyEndDateTime = new Date(endDateTimeString);
-
-      // ❌ Stop if invalid
-      if (isNaN(partyEndDateTime.getTime())) {
-        throw new Error("Invalid end date or time");
-      }
-
-      // ❌ Stop if end is before start
-      if (partyEndDateTime <= partyDateTime) {
-        throw new Error("End time must be after start time");
-      }
-
-      // ✅ Convert to ISO for Supabase
-      const partyEndDateTimeISO = partyEndDateTime.toISOString();
 
       // 3. Calculate totals from tiers
-      const lowestPrice = Math.min(
-        ...ticketTiers.map((t) => parseFloat(t.price)),
-      );
-      const totalQuantity = ticketTiers.reduce(
-        (sum, t) => sum + parseInt(t.quantity),
-        0,
-      );
+      // Handle TBA gracefully
+      let lowestPrice: number | null = null;
+      let totalQuantity = 0;
+
+      if (!priceTBA && ticketTiers.length > 0) {
+        lowestPrice = Math.min(
+          ...ticketTiers.map((t) => safeParseFloat(t.price)),
+        );
+        totalQuantity = ticketTiers.reduce(
+          (sum, t) => sum + safeParseInt(t.quantity),
+          0,
+        );
+      } else {
+        // If Price is TBA, we can set ticket_price to NULL (if schema allows) or 0.
+        // The schema migration said: `ALTER COLUMN ticket_price DROP NOT NULL;`
+        // So we can send NULL.
+        lowestPrice = null;
+      }
 
       // 4. Create party
       const { data: party, error: partyError } = await supabase
@@ -293,12 +413,21 @@ export default function CreatePartyScreen() {
           host_id: user.id,
           title: title.trim(),
           description: description.trim() || null,
-          flyer_url: publicUrl,
+          flyer_url: primaryUrl,
           date: partyDateTimeISO,
           end_date: partyEndDateTimeISO,
-          location: location.trim(),
-          city: city.trim(),
-          ticket_price: lowestPrice,
+          date_tba: dateTBA,
+          location: locationTBA ? null : location.trim(),
+          city: locationTBA ? null : city.trim(),
+          location_tba: locationTBA,
+          ticket_price: lowestPrice, // Can be null
+          ticket_price_tba: priceTBA,
+          currency_code: currency,
+
+          // Additional fields
+          dress_code: dressCode.trim() || null,
+
+          // Legacy/Computed
           ticket_quantity: totalQuantity,
           tickets_sold: 0,
           music_genres: selectedGenres,
@@ -310,28 +439,52 @@ export default function CreatePartyScreen() {
 
       if (partyError) throw partyError;
 
-      // 5. ✅ CREATE TICKET TIERS (THIS WAS MISSING!)
-      const tiersToInsert = ticketTiers.map((tier, index) => ({
-        party_id: party.id,
-        name: tier.name.trim(),
-        description: null,
-        price: parseFloat(tier.price),
-        quantity: parseInt(tier.quantity),
-        quantity_sold: 0,
-        tier_order: index,
-        is_active: true,
-      }));
+      // 5. Insert Media mapping records
+      if (uploadedMedia.length > 0) {
+        const mediaToInsert = uploadedMedia.map((item, index) => ({
+          party_id: party.id,
+          media_type: item.type,
+          media_url: item.uploadedUrl,
+          is_primary: item.isPrimary,
+          display_order: index,
+        }));
 
-      const { error: tiersError } = await supabase
-        .from("ticket_tiers")
-        .insert(tiersToInsert);
+        const { error: mediaError } = await supabase
+          .from("party_media")
+          .insert(mediaToInsert);
 
-      if (tiersError) throw tiersError;
+        if (mediaError)
+          console.error("Media insert error (non-fatal):", mediaError);
+      }
+
+      // 6. Create Ticket Tiers
+      if (!priceTBA && ticketTiers.length > 0) {
+        const tiersToInsert = ticketTiers.map((tier, index) => ({
+          party_id: party.id,
+          name: tier.name.trim(),
+          description: null,
+          price: safeParseFloat(tier.price),
+          quantity: safeParseInt(tier.quantity),
+          quantity_sold: 0,
+          tier_order: index,
+          is_active: true,
+          currency_code: currency,
+        }));
+
+        const { error: tiersError } = await supabase
+          .from("ticket_tiers")
+          .insert(tiersToInsert);
+
+        if (tiersError) throw tiersError;
+      }
 
       Alert.alert("Success!", "Your party has been published!", [
         {
           text: "OK",
-          onPress: () => router.replace("/(app)/feed"),
+          onPress: () => {
+            resetForm();
+            router.replace("/(app)/feed");
+          },
         },
       ]);
     } catch (error: any) {
@@ -342,594 +495,14 @@ export default function CreatePartyScreen() {
     }
   };
 
-  const renderStepIndicator = () => (
-    <View className="mb-3">
-      {/* Step Numbers */}
-      <View className="flex-row justify-between items-center mt-5 mb-2">
-        {STEPS.map((step) => (
-          <View key={step.id} className="flex-1 items-center">
-            <View
-              className={`w-10 h-1 rounded-full items-center justify-center ${
-                currentStep > step.id
-                  ? "bg-purple-600"
-                  : currentStep === step.id
-                    ? "bg-purple-600"
-                    : "bg-white/10"
-              }`}
-            ></View>
-          </View>
-        ))}
-      </View>
-    </View>
-  );
-
-  const renderStep = () => {
-    switch (currentStep) {
-      case 1:
-        return (
-          <View>
-            <Text className="text-purple-600 mb-6 uppercase">Step 1</Text>
-            <Text className="text-white text-[35px] font-bold mb-2">
-              Visuals
-            </Text>
-            <Text className="text-gray-400 mb-6">
-              Add a flyer or video to hype up your event.
-            </Text>
-
-            <TouchableOpacity
-              onPress={pickFlyer}
-              className="bg-white/5 border-2 border-dashed border-white/20 rounded-2xl overflow-hidden mb-4"
-              style={{ aspectRatio: 4 / 5, maxHeight: 500 }}
-              activeOpacity={0.8}
-            >
-              {flyerImage ? (
-                <Image source={{ uri: flyerImage }} className="w-full h-full" />
-              ) : (
-                <View className="flex-1 items-center justify-center">
-                  <Ionicons name="images-outline" size={64} color="#666" />
-                  <Text className="text-gray-400 mt-4 text-lg font-semibold">
-                    Tap to upload flyer
-                  </Text>
-                  <Text className="text-gray-600 text-sm mt-2">
-                    4:5 ratio recommended
-                  </Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          </View>
-        );
-
-      case 2:
-        return (
-          <View>
-            <Text className="text-purple-600 mb-6 uppercase">Step 2</Text>
-            <Text className="text-white text-[35px] font-bold mb-2">
-              The Basics
-            </Text>
-            <Text className="text-gray-400 mb-6">Tell us about your party</Text>
-
-            <View className="mb-4">
-              <Text className="text-white text-sm font-semibold mb-2">
-                Party Name *
-              </Text>
-              <TextInput
-                className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white"
-                placeholder="e.g., Afrobeat Night Out"
-                placeholderTextColor="#666"
-                value={title}
-                onChangeText={setTitle}
-              />
-            </View>
-
-            <View className="mb-4">
-              <Text className="text-white text-sm font-semibold mb-2">
-                Description (Optional)
-              </Text>
-              <TextInput
-                className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white"
-                placeholder="What makes this party special?"
-                placeholderTextColor="#666"
-                value={description}
-                onChangeText={setDescription}
-                multiline
-                numberOfLines={3}
-                textAlignVertical="top"
-              />
-            </View>
-
-            {/* Start Date & Time */}
-            <View className="mb-4">
-              <Text className="text-white text-sm font-semibold mb-2">
-                Start Date & Time *
-              </Text>
-              <View className="flex-row gap-3 mb-3">
-                {/* Date Input - Clicking opens calendar */}
-                <TouchableOpacity
-                  onPress={() => setShowStartDatePicker(true)}
-                  className="flex-1 bg-white/10 border border-white/20 rounded-xl px-4 py-3 flex-row items-center justify-between"
-                >
-                  <Text className={startDate ? "text-white" : "text-gray-600"}>
-                    {startDate || "YYYY-MM-DD"}
-                  </Text>
-                  <Ionicons name="calendar-outline" size={20} color="#666" />
-                </TouchableOpacity>
-
-                {/* Time Input - Clicking opens time picker */}
-                <TouchableOpacity
-                  onPress={() => setShowStartTimePicker(true)}
-                  className="flex-1 bg-white/10 border border-white/20 rounded-xl px-4 py-3 flex-row items-center justify-between"
-                >
-                  <Text className={startTime ? "text-white" : "text-gray-600"}>
-                    {startTime ? formatTime(startDateTime) : "HH:MM AM"}
-                  </Text>
-                  <Ionicons name="time-outline" size={20} color="#666" />
-                </TouchableOpacity>
-              </View>
-
-              {/* Start Date Picker Modal */}
-              {showStartDatePicker && (
-                <Modal
-                  transparent
-                  animationType="slide"
-                  visible={showStartDatePicker}
-                >
-                  <View className="flex-1 justify-center bg-black/50">
-                    <View className="bg-[#191022] rounded-3xl">
-                      {/* Header with Done button */}
-                      <View className="flex-row justify-between items-center px-6 py-4 border-b border-white/10">
-                        <TouchableOpacity
-                          onPress={() => setShowStartDatePicker(false)}
-                        >
-                          <Text className="text-gray-400 text-base">
-                            Cancel
-                          </Text>
-                        </TouchableOpacity>
-                        <Text className="text-white font-bold text-base">
-                          Select Date
-                        </Text>
-                        <TouchableOpacity
-                          onPress={() => setShowStartDatePicker(false)}
-                        >
-                          <Text className="text-purple-500 text-base font-semibold">
-                            Done
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-
-                      {/* Date Picker */}
-                      <DateTimePicker
-                        value={startDateTime}
-                        mode="date"
-                        display="spinner"
-                        onChange={(event, date) => {
-                          if (date) {
-                            setStartDateTime(date);
-                            setStartDate(formatDate(date));
-                          }
-                        }}
-                        minimumDate={new Date()}
-                        textColor="#fff"
-                      />
-                    </View>
-                  </View>
-                </Modal>
-              )}
-
-              {/* Start Time Picker Modal */}
-              {showStartTimePicker && (
-                <Modal
-                  transparent
-                  animationType="slide"
-                  visible={showStartTimePicker}
-                >
-                  <View className="flex-1 pb-8 justify-center bg-black/50">
-                    <View className="bg-[#191022] rounded-3xl">
-                      <View className="flex-row justify-between items-center px-6 py-4 border-b border-white/10">
-                        <TouchableOpacity
-                          onPress={() => setShowStartTimePicker(false)}
-                        >
-                          <Text className="text-gray-400 text-base">
-                            Cancel
-                          </Text>
-                        </TouchableOpacity>
-                        <Text className="text-white font-bold text-base">
-                          Select Time
-                        </Text>
-                        <TouchableOpacity
-                          onPress={() => setShowStartTimePicker(false)}
-                        >
-                          <Text className="text-purple-500 text-base font-semibold">
-                            Done
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-
-                      <DateTimePicker
-                        value={startDateTime}
-                        mode="time"
-                        display="spinner"
-                        onChange={(event, time) => {
-                          if (time) {
-                            setStartDateTime(time);
-                            setStartTime(time.toTimeString().slice(0, 5));
-                          }
-                        }}
-                        textColor="#fff"
-                      />
-                    </View>
-                  </View>
-                </Modal>
-              )}
-            </View>
-
-            {/* End Date & Time (Optional) */}
-            <View className="mb-4">
-              <Text className="text-white text-sm font-semibold mb-2">
-                End Date & Time *
-              </Text>
-              <View className="flex-row gap-3">
-                {/* End Date Input */}
-                <TouchableOpacity
-                  onPress={() => setShowEndDatePicker(true)}
-                  className="flex-1 bg-white/10 border border-white/20 rounded-xl px-4 py-3 flex-row items-center justify-between"
-                >
-                  <Text className={endDate ? "text-white" : "text-gray-600"}>
-                    {endDate || "YYYY-MM-DD"}
-                  </Text>
-                  <Ionicons name="calendar-outline" size={20} color="#666" />
-                </TouchableOpacity>
-
-                {/* End Time Input */}
-                <TouchableOpacity
-                  onPress={() => setShowEndTimePicker(true)}
-                  className="flex-1 bg-white/10 border border-white/20 rounded-xl px-4 py-3 flex-row items-center justify-between"
-                >
-                  <Text className={endTime ? "text-white" : "text-gray-600"}>
-                    {endTime ? formatTime(endDateTime) : "HH:MM AM"}
-                  </Text>
-                  <Ionicons name="time-outline" size={20} color="#666" />
-                </TouchableOpacity>
-              </View>
-
-              {/* End Date Picker Modal */}
-              {showEndDatePicker && (
-                <Modal
-                  transparent
-                  animationType="slide"
-                  visible={showEndDatePicker}
-                >
-                  <View className="flex-1 justify-center bg-black/50">
-                    <View className="bg-[#191022] rounded-3xl">
-                      <View className="flex-row justify-between items-center px-6 py-4 border-b border-white/10">
-                        <TouchableOpacity
-                          onPress={() => setShowEndDatePicker(false)}
-                        >
-                          <Text className="text-gray-400 text-base">
-                            Cancel
-                          </Text>
-                        </TouchableOpacity>
-                        <Text className="text-white font-bold text-base">
-                          Select End Date
-                        </Text>
-                        <TouchableOpacity
-                          onPress={() => setShowEndDatePicker(false)}
-                        >
-                          <Text className="text-purple-500 text-base font-semibold">
-                            Done
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-
-                      <DateTimePicker
-                        value={endDateTime}
-                        mode="date"
-                        display="spinner"
-                        onChange={(event, date) => {
-                          if (date) {
-                            setEndDateTime(date);
-                            setEndDate(formatDate(date));
-                          }
-                        }}
-                        minimumDate={startDateTime}
-                        textColor="#fff"
-                      />
-                    </View>
-                  </View>
-                </Modal>
-              )}
-
-              {/* End Time Picker Modal */}
-              {showEndTimePicker && (
-                <Modal
-                  transparent
-                  animationType="slide"
-                  visible={showEndTimePicker}
-                >
-                  <View className="flex-1 justify-center bg-black/50">
-                    <View className="bg-[#191022] rounded-3xl">
-                      <View className="flex-row justify-between items-center px-6 py-4 border-b border-white/10">
-                        <TouchableOpacity
-                          onPress={() => setShowEndTimePicker(false)}
-                        >
-                          <Text className="text-gray-400 text-base">
-                            Cancel
-                          </Text>
-                        </TouchableOpacity>
-                        <Text className="text-white font-bold text-base">
-                          Select End Time
-                        </Text>
-                        <TouchableOpacity
-                          onPress={() => setShowEndTimePicker(false)}
-                        >
-                          <Text className="text-purple-500 text-base font-semibold">
-                            Done
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-
-                      <DateTimePicker
-                        value={endDateTime}
-                        mode="time"
-                        display="spinner"
-                        onChange={(event, time) => {
-                          if (time) {
-                            setEndDateTime(time);
-                            setEndTime(time.toTimeString().slice(0, 5));
-                          }
-                        }}
-                        textColor="#fff"
-                      />
-                    </View>
-                  </View>
-                </Modal>
-              )}
-            </View>
-
-            <View className="mb-4">
-              <Text className="text-white text-sm font-semibold mb-2">
-                Location *
-              </Text>
-              <TextInput
-                className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white mb-3"
-                placeholder="e.g., The Shrine, Ikeja"
-                placeholderTextColor="#666"
-                value={location}
-                onChangeText={setLocation}
-              />
-              <TextInput
-                className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white"
-                placeholder="City (e.g., Lagos)"
-                placeholderTextColor="#666"
-                value={city}
-                onChangeText={setCity}
-              />
-            </View>
-          </View>
-        );
-      case 3:
-        return (
-          <View className="mb-6">
-            <Text className="text-purple-600 mb-6 uppercase">Step 3</Text>
-            <Text className="text-white text-[35px] font-bold mb-2">
-              Set the Vibe
-            </Text>
-            <Text className="text-gray-400 mb-6">
-              Help people find your party
-            </Text>
-
-            <View className="mb-6">
-              <Text className="text-white text-lg font-bold mb-3">
-                Music Genres *
-              </Text>
-              <View className="flex-row flex-wrap gap-3">
-                {MUSIC_GENRES.map((genre) => (
-                  <TouchableOpacity
-                    key={genre}
-                    onPress={() => toggleGenre(genre)}
-                    className={`px-4 py-2 rounded-full border ${
-                      selectedGenres.includes(genre)
-                        ? "bg-purple-600 border-purple-600"
-                        : "bg-white/10 border-white/20"
-                    }`}
-                  >
-                    <Text
-                      className={
-                        selectedGenres.includes(genre)
-                          ? "text-white font-semibold"
-                          : "text-gray-300 font-semibold"
-                      }
-                    >
-                      {genre}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            <View>
-              <Text className="text-white text-lg font-bold mb-3">Vibes *</Text>
-              <View className="flex-row flex-wrap gap-3">
-                {VIBES.map((vibe) => (
-                  <TouchableOpacity
-                    key={vibe}
-                    onPress={() => toggleVibe(vibe)}
-                    className={`px-4 py-2 rounded-full border ${
-                      selectedVibes.includes(vibe)
-                        ? "bg-purple-600 border-purple-600"
-                        : "bg-white/10 border-white/20"
-                    }`}
-                  >
-                    <Text
-                      className={
-                        selectedVibes.includes(vibe)
-                          ? "text-white font-semibold"
-                          : "text-gray-300 font-semibold"
-                      }
-                    >
-                      {vibe}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          </View>
-        );
-
-      case 4:
-        return (
-          <View>
-            <Text className="text-purple-600 mb-6 uppercase">Step 4</Text>
-            <Text className="text-white text-[35px] font-bold mb-2">
-              Ticket Tiers
-            </Text>
-            <Text className="text-gray-400 mb-6">
-              Set up your ticket pricing
-            </Text>
-
-            {ticketTiers.map((tier, index) => (
-              <View
-                key={tier.id}
-                className="bg-white/5 border border-white/10 rounded-2xl p-4 mb-3"
-              >
-                <View className="flex-row justify-between items-center mb-3">
-                  <Text className="text-white font-bold">Tier {index + 1}</Text>
-                  {ticketTiers.length > 1 && (
-                    <TouchableOpacity onPress={() => removeTicketTier(tier.id)}>
-                      <Ionicons
-                        name="trash-outline"
-                        size={20}
-                        color="#ef4444"
-                      />
-                    </TouchableOpacity>
-                  )}
-                </View>
-
-                <TextInput
-                  className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white mb-3"
-                  placeholder="Tier name (e.g., VIP, General)"
-                  placeholderTextColor="#666"
-                  value={tier.name}
-                  onChangeText={(val) => updateTicketTier(tier.id, "name", val)}
-                />
-
-                <View className="flex-row gap-3">
-                  <TextInput
-                    className="flex-1 bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white"
-                    placeholder="Price (₦)"
-                    placeholderTextColor="#666"
-                    value={tier.price}
-                    onChangeText={(val) =>
-                      updateTicketTier(tier.id, "price", val)
-                    }
-                    keyboardType="numeric"
-                  />
-                  <TextInput
-                    className="flex-1 bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white"
-                    placeholder="Quantity"
-                    placeholderTextColor="#666"
-                    value={tier.quantity}
-                    onChangeText={(val) =>
-                      updateTicketTier(tier.id, "quantity", val)
-                    }
-                    keyboardType="numeric"
-                  />
-                </View>
-              </View>
-            ))}
-
-            <TouchableOpacity
-              onPress={addTicketTier}
-              className="flex-row items-center justify-center bg-white/10 border border-white/20 rounded-xl py-3 mb-4"
-            >
-              <Ionicons name="add-circle-outline" size={20} color="#8B5CF6" />
-              <Text className="text-purple-400 font-semibold ml-2">
-                Add Another Tier
-              </Text>
-            </TouchableOpacity>
-          </View>
-        );
-
-      case 5:
-        return (
-          <View className="mb-6">
-            <Text className="text-purple-600 mb-6 uppercase">Step 5</Text>
-            <Text className="text-white text-2xl font-bold mb-2">Preview</Text>
-            <Text className="text-gray-400 mb-6">Review before publishing</Text>
-
-            {/* Flyer Preview */}
-            {flyerImage && (
-              <Image
-                source={{ uri: flyerImage }}
-                className="w-full rounded-2xl mb-4"
-                style={{ aspectRatio: 4 / 5 }}
-              />
-            )}
-
-            {/* Party Details */}
-            <View className="bg-white/5 rounded-2xl p-4 mb-4">
-              <Text className="text-white text-xl font-bold mb-2">{title}</Text>
-              {description && (
-                <Text className="text-gray-300 text-sm mb-3">
-                  {description}
-                </Text>
-              )}
-
-              <View className="flex-row items-center mb-2">
-                <Ionicons name="calendar-outline" size={16} color="#9ca3af" />
-                <Text className="text-gray-400 text-sm ml-2">
-                  {startDate} at {startTime}
-                </Text>
-              </View>
-
-              <View className="flex-row items-center mb-2">
-                <Ionicons name="location-outline" size={16} color="#9ca3af" />
-                <Text className="text-gray-400 text-sm ml-2">
-                  {location}, {city}
-                </Text>
-              </View>
-
-              <View className="flex-row flex-wrap gap-2 mt-3">
-                {selectedGenres.slice(0, 3).map((genre) => (
-                  <View
-                    key={genre}
-                    className="bg-purple-600/20 px-3 py-1 rounded-full"
-                  >
-                    <Text className="text-purple-300 text-xs">{genre}</Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-
-            {/* Ticket Tiers Preview */}
-            <View className="bg-white/5 rounded-2xl p-4">
-              <Text className="text-white font-bold mb-3">Ticket Tiers</Text>
-              {ticketTiers.map((tier) => (
-                <View
-                  key={tier.id}
-                  className="flex-row justify-between items-center py-2 border-b border-white/10"
-                >
-                  <Text className="text-gray-300">{tier.name}</Text>
-                  <Text className="text-white font-semibold">
-                    ₦{tier.price} • {tier.quantity} available
-                  </Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        );
-
-      default:
-        return null;
-    }
-  };
-
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : "height"}
-      className="flex-1 bg-[#191022]"
+      className="flex-1 bg-[#09030e]"
+      keyboardVerticalOffset={Platform.OS === "ios" ? 10 : 0}
     >
       {/* 🔒 FIXED HEADER */}
-      <View className="pt-16 px-6 pb-0 bg-[#191022] z-10">
+      <View className="pt-16 px-6 pb-2 bg-[#09030e] z-10 border-b border-white/5">
         <View className="flex-row items-center justify-between">
           <TouchableOpacity
             onPress={() => {
@@ -939,55 +512,749 @@ export default function CreatePartyScreen() {
                 handleBack();
               }
             }}
+            className="w-10 h-10 bg-white/5 rounded-full items-center justify-center border border-white/10"
           >
-            <Ionicons name="arrow-back" size={24} color="#fff" />
+            <Ionicons name="arrow-back" size={20} color="#fff" />
           </TouchableOpacity>
 
-          <Text className="text-white text-xl font-bold">Create Party</Text>
+          <Text className="text-white text-lg font-extrabold tracking-wide">Create Party</Text>
 
-          <View style={{ width: 24 }} />
+          <View style={{ width: 40 }} />
         </View>
-        {renderStepIndicator()}
+
+        {/* Step Indicator */}
+        <View className="mt-6 mb-2">
+          <View className="flex-row justify-between items-center">
+            {STEPS.map((step) => (
+              <View key={step.id} className="flex-1 items-center mx-1">
+                <View
+                  className={`w-full h-1.5 rounded-full ${
+                    currentStep > step.id
+                      ? "bg-[#a855f7]"
+                      : currentStep === step.id
+                        ? "bg-[#a855f7]"
+                        : "bg-white/10"
+                  }`}
+                />
+              </View>
+            ))}
+          </View>
+        </View>
       </View>
 
       <ScrollView
-        className="flex-1"
+        className="flex-1 pb-8"
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <View className="pt-6 px-6 pb-8">
-          {/* Progress Indicator */}
-
-          {/* Error */}
+        <View className="pt-8 px-6 pb-8">
           {error ? (
-            <View className="bg-red-500/20 border border-red-500/50 rounded-xl p-4 mb-4">
-              <Text className="text-red-300 text-sm font-medium">{error}</Text>
+            <View className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 mb-6 flex-row items-center">
+              <Ionicons name="warning" size={20} color="#f87171" />
+              <Text className="text-red-400 text-sm font-semibold ml-3 flex-1">{error}</Text>
             </View>
           ) : null}
 
-          {/* Step Content */}
-          {renderStep()}
+          {/* Step 1: Visuals */}
+          {currentStep === 1 && (
+            <View className="animate-fade-in">
+              <View className="mb-8">
+                <Text className="text-purple-400 text-sm font-bold uppercase tracking-widest mb-2">Step 1</Text>
+                <Text className="text-white text-4xl font-extrabold mb-2 tracking-tight">
+                  Visuals
+                </Text>
+                <Text className="text-gray-400 text-base">
+                  Add images and videos to showcase your event. First item will be the cover.
+                </Text>
+              </View>
+
+              <MediaGalleryUploader
+                onMediaChange={setMediaGallery}
+                maxImages={10}
+                maxVideos={3}
+              />
+            </View>
+          )}
+
+          {/* Step 2: Basics */}
+          {currentStep === 2 && (
+            <View className="animate-fade-in">
+              <View className="mb-8">
+                <Text className="text-purple-400 text-sm font-bold uppercase tracking-widest mb-2">Step 2</Text>
+                <Text className="text-white text-4xl font-extrabold mb-2 tracking-tight">
+                  The Basics
+                </Text>
+                <Text className="text-gray-400 text-base">
+                  Tell people what your party is about.
+                </Text>
+              </View>
+
+              <View className="mb-4">
+                <Text className="text-white text-sm font-semibold mb-2">
+                  Party Name *
+                </Text>
+                <TextInput
+                  className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white"
+                  placeholder="e.g., Afrobeat Night Out"
+                  placeholderTextColor="#666"
+                  value={title}
+                  onChangeText={setTitle}
+                />
+              </View>
+
+              <View className="mb-4">
+                <Text className="text-white text-sm font-semibold mb-2">
+                  Description (Optional)
+                </Text>
+                <TextInput
+                  className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white"
+                  placeholder="What makes this party special?"
+                  placeholderTextColor="#666"
+                  value={description}
+                  onChangeText={setDescription}
+                  multiline
+                  numberOfLines={3}
+                  textAlignVertical="top"
+                />
+              </View>
+
+              {/* Start Date & Time */}
+              <View className="mb-4">
+                <Text className="text-white text-sm font-semibold mb-3">
+                  Start Date & Time
+                </Text>
+
+                <TBAToggle
+                  label="Date & Time TBA"
+                  value={dateTBA}
+                  onChange={setDateTBA}
+                  description="Mark if you haven't finalized the date yet"
+                />
+
+                {!dateTBA && (
+                  <View className="flex-row gap-3 mb-3 mt-3">
+                    <TouchableOpacity
+                      onPress={() => setShowStartDatePicker(true)}
+                      className="flex-1 bg-white/10 border border-white/20 rounded-xl px-4 py-3 flex-row items-center justify-between"
+                    >
+                      <Text
+                        className={startDate ? "text-white" : "text-gray-600"}
+                      >
+                        {startDate || "YYYY-MM-DD"}
+                      </Text>
+                      <Ionicons
+                        name="calendar-outline"
+                        size={20}
+                        color="#666"
+                      />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => setShowStartTimePicker(true)}
+                      className="flex-1 bg-white/10 border border-white/20 rounded-xl px-4 py-3 flex-row items-center justify-between"
+                    >
+                      <Text
+                        className={startTime ? "text-white" : "text-gray-600"}
+                      >
+                        {startTime ? formatTime(startDateTime) : "HH:MM AM"}
+                      </Text>
+                      <Ionicons name="time-outline" size={20} color="#666" />
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {/* Date Pickers */}
+                {showStartDatePicker && (
+                  <Modal
+                    transparent
+                    animationType="fade"
+                    visible={showStartDatePicker}
+                  >
+                    <View className="flex-1 justify-center bg-black/80 px-4">
+                      <View className="bg-[#191022] rounded-3xl overflow-hidden">
+                        <View className="flex-row justify-between items-center p-4 border-b border-white/10 bg-[#251833]">
+                          <TouchableOpacity
+                            onPress={() => setShowStartDatePicker(false)}
+                          >
+                            <Text className="text-gray-400 font-semibold">
+                              Cancel
+                            </Text>
+                          </TouchableOpacity>
+                          <Text className="text-white font-bold">
+                            Select Date
+                          </Text>
+                          <TouchableOpacity
+                            onPress={() => setShowStartDatePicker(false)}
+                          >
+                            <Text className="text-purple-500 font-bold">
+                              Done
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                        <View className="p-4 items-center">
+                          <DateTimePicker
+                            value={startDateTime}
+                            mode="date"
+                            display="spinner"
+                            onChange={(event, date) => {
+                              if (date) {
+                                setStartDateTime(date);
+                                setStartDate(formatDate(date));
+                              }
+                            }}
+                            minimumDate={new Date()}
+                            textColor="#fff"
+                          />
+                        </View>
+                      </View>
+                    </View>
+                  </Modal>
+                )}
+
+                {showStartTimePicker && (
+                  <Modal
+                    transparent
+                    animationType="fade"
+                    visible={showStartTimePicker}
+                  >
+                    <View className="flex-1 justify-center bg-black/80 px-4">
+                      <View className="bg-[#191022] rounded-3xl overflow-hidden">
+                        <View className="flex-row justify-between items-center p-4 border-b border-white/10 bg-[#251833]">
+                          <TouchableOpacity
+                            onPress={() => setShowStartTimePicker(false)}
+                          >
+                            <Text className="text-gray-400 font-semibold">
+                              Cancel
+                            </Text>
+                          </TouchableOpacity>
+                          <Text className="text-white font-bold">
+                            Select Time
+                          </Text>
+                          <TouchableOpacity
+                            onPress={() => setShowStartTimePicker(false)}
+                          >
+                            <Text className="text-purple-500 font-bold">
+                              Done
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                        <View className="p-4 items-center">
+                          <DateTimePicker
+                            value={startDateTime}
+                            mode="time"
+                            display="spinner"
+                            onChange={(event, time) => {
+                              if (time) {
+                                setStartDateTime(time);
+                                setStartTime(time.toTimeString().slice(0, 5));
+                              }
+                            }}
+                            textColor="#fff"
+                          />
+                        </View>
+                      </View>
+                    </View>
+                  </Modal>
+                )}
+              </View>
+
+              {/* End Date & Time (Optional) */}
+              {!dateTBA && (
+                <View className="mb-4">
+                  <Text className="text-white text-sm font-semibold mb-2">
+                    End Date & Time *
+                  </Text>
+                  <View className="flex-row gap-3">
+                    <TouchableOpacity
+                      onPress={() => setShowEndDatePicker(true)}
+                      className="flex-1 bg-white/10 border border-white/20 rounded-xl px-4 py-3 flex-row items-center justify-between"
+                    >
+                      <Text
+                        className={endDate ? "text-white" : "text-gray-600"}
+                      >
+                        {endDate || "YYYY-MM-DD"}
+                      </Text>
+                      <Ionicons
+                        name="calendar-outline"
+                        size={20}
+                        color="#666"
+                      />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => setShowEndTimePicker(true)}
+                      className="flex-1 bg-white/10 border border-white/20 rounded-xl px-4 py-3 flex-row items-center justify-between"
+                    >
+                      <Text
+                        className={endTime ? "text-white" : "text-gray-600"}
+                      >
+                        {endTime ? formatTime(endDateTime) : "HH:MM AM"}
+                      </Text>
+                      <Ionicons name="time-outline" size={20} color="#666" />
+                    </TouchableOpacity>
+                  </View>
+
+                  {showEndDatePicker && (
+                    <Modal
+                      transparent
+                      animationType="fade"
+                      visible={showEndDatePicker}
+                    >
+                      <View className="flex-1 justify-center bg-black/80 px-4">
+                        <View className="bg-[#191022] rounded-3xl overflow-hidden">
+                          <View className="flex-row justify-between items-center p-4 border-b border-white/10 bg-[#251833]">
+                            <TouchableOpacity
+                              onPress={() => setShowEndDatePicker(false)}
+                            >
+                              <Text className="text-gray-400 font-semibold">
+                                Cancel
+                              </Text>
+                            </TouchableOpacity>
+                            <Text className="text-white font-bold">
+                              End Date
+                            </Text>
+                            <TouchableOpacity
+                              onPress={() => setShowEndDatePicker(false)}
+                            >
+                              <Text className="text-purple-500 font-bold">
+                                Done
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                          <View className="p-4 items-center">
+                            <DateTimePicker
+                              value={endDateTime}
+                              mode="date"
+                              display="spinner"
+                              onChange={(event, date) => {
+                                if (date) {
+                                  setEndDateTime(date);
+                                  setEndDate(formatDate(date));
+                                }
+                              }}
+                              minimumDate={startDateTime}
+                              textColor="#fff"
+                            />
+                          </View>
+                        </View>
+                      </View>
+                    </Modal>
+                  )}
+
+                  {showEndTimePicker && (
+                    <Modal
+                      transparent
+                      animationType="fade"
+                      visible={showEndTimePicker}
+                    >
+                      <View className="flex-1 justify-center bg-black/80 px-4">
+                        <View className="bg-[#191022] rounded-3xl overflow-hidden">
+                          <View className="flex-row justify-between items-center p-4 border-b border-white/10 bg-[#251833]">
+                            <TouchableOpacity
+                              onPress={() => setShowEndTimePicker(false)}
+                            >
+                              <Text className="text-gray-400 font-semibold">
+                                Cancel
+                              </Text>
+                            </TouchableOpacity>
+                            <Text className="text-white font-bold">
+                              End Time
+                            </Text>
+                            <TouchableOpacity
+                              onPress={() => setShowEndTimePicker(false)}
+                            >
+                              <Text className="text-purple-500 font-bold">
+                                Done
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                          <View className="p-4 items-center">
+                            <DateTimePicker
+                              value={endDateTime}
+                              mode="time"
+                              display="spinner"
+                              onChange={(event, time) => {
+                                if (time) {
+                                  setEndDateTime(time);
+                                  setEndTime(time.toTimeString().slice(0, 5));
+                                }
+                              }}
+                              textColor="#fff"
+                            />
+                          </View>
+                        </View>
+                      </View>
+                    </Modal>
+                  )}
+                </View>
+              )}
+
+              <View className="mb-4">
+                <Text className="text-white text-sm font-semibold mb-3">
+                  Location
+                </Text>
+
+                <TBAToggle
+                  label="Location TBA"
+                  value={locationTBA}
+                  onChange={setLocationTBA}
+                  description="Mark if venue is still being confirmed"
+                />
+
+                {!locationTBA && (
+                  <View className="mt-3 z-50">
+                    <GooglePlacesAutocomplete
+                      placeholder="e.g., The Shrine, Ikeja"
+                      onPress={(data, details = null) => {
+                        setLocation(data.description);
+                        // Extract city from details if available
+                        if (details) {
+                          const cityComp = details.address_components.find(c => 
+                            c.types.includes("locality") || c.types.includes("administrative_area_level_2")
+                          );
+                          if (cityComp) setCity(cityComp.long_name);
+                        }
+                      }}
+                      query={{
+                        key: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
+                        language: "en",
+                        types: "geocode",
+                      }}
+                      fetchDetails={true}
+                      textInputProps={{
+                        placeholderTextColor: "#666",
+                        className: "bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white mb-3",
+                        value: location,
+                        onChangeText: setLocation,
+                      }}
+                      styles={{
+                        container: { flex: 0 },
+                        listView: { 
+                          backgroundColor: "#191022",
+                          borderWidth: 1,
+                          borderColor: "rgba(255,255,255,0.1)",
+                          borderRadius: 8,
+                          position: 'absolute',
+                          top: 55,
+                        },
+                        description: { color: "#fff" },
+                        row: { backgroundColor: 'transparent', padding: 13 },
+                      }}
+                    />
+                    <TextInput
+                      className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white"
+                      placeholder="City (e.g., Lagos)"
+                      placeholderTextColor="#666"
+                      value={city}
+                      onChangeText={setCity}
+                    />
+                  </View>
+                )}
+              </View>
+            </View>
+          )}
+
+          {/* Step 3: Vibes */}
+          {currentStep === 3 && (
+            <View className="animate-fade-in mb-6">
+              <View className="mb-8">
+                <Text className="text-purple-400 text-sm font-bold uppercase tracking-widest mb-2">Step 3</Text>
+                <Text className="text-white text-4xl font-extrabold mb-2 tracking-tight">
+                  Set the Vibe
+                </Text>
+                <Text className="text-gray-400 text-base">
+                  Help people find your party
+                </Text>
+              </View>
+
+              <View className="mb-8">
+                <Text className="text-white text-lg font-bold mb-4">
+                  Music Genres *
+                </Text>
+                <View className="flex-row flex-wrap gap-3">
+                  {MUSIC_GENRES.map((genre) => (
+                    <TouchableOpacity
+                      key={genre}
+                      onPress={() => toggleGenre(genre)}
+                      className={`px-5 py-2.5 rounded-full border ${
+                        selectedGenres.includes(genre)
+                          ? "bg-purple-600 border-purple-500"
+                          : "bg-[#150d1e] border-white/10"
+                      }`}
+                      style={
+                        selectedGenres.includes(genre)
+                          ? { shadowColor: '#9333ea', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 }
+                          : undefined
+                      }
+                      activeOpacity={0.8}
+                    >
+                      <Text
+                        className={
+                          selectedGenres.includes(genre)
+                            ? "text-white font-bold"
+                            : "text-gray-300 font-semibold"
+                        }
+                      >
+                        {genre}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View>
+                <Text className="text-white text-lg font-bold mb-4">
+                  Vibes *
+                </Text>
+                <View className="flex-row flex-wrap gap-3">
+                  {VIBES.map((vibe) => (
+                    <TouchableOpacity
+                      key={vibe}
+                      onPress={() => toggleVibe(vibe)}
+                      className={`px-5 py-2.5 rounded-full border ${
+                        selectedVibes.includes(vibe)
+                          ? "bg-purple-600 border-purple-500"
+                          : "bg-[#150d1e] border-white/10"
+                      }`}
+                      style={
+                        selectedVibes.includes(vibe)
+                          ? { shadowColor: '#9333ea', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 }
+                          : undefined
+                      }
+                      activeOpacity={0.8}
+                    >
+                      <Text
+                        className={
+                          selectedVibes.includes(vibe)
+                            ? "text-white font-bold"
+                            : "text-gray-300 font-semibold"
+                        }
+                      >
+                        {vibe}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            </View>
+          )}
+
+          {/* Step 4: Tickets */}
+          {currentStep === 4 && (
+            <View className="animate-fade-in">
+              <View className="mb-8">
+                <Text className="text-purple-400 text-sm font-bold uppercase tracking-widest mb-2">Step 4</Text>
+                <Text className="text-white text-4xl font-extrabold mb-2 tracking-tight">
+                  Ticket Tiers
+                </Text>
+                <Text className="text-gray-400 text-base">
+                  Set up your ticket pricing
+                </Text>
+              </View>
+
+              <View className="mb-8 p-4 bg-[#150d1e] rounded-3xl border border-white/5">
+                <Text className="text-white text-sm font-semibold mb-4">
+                  Party Currency
+                </Text>
+                <CurrencySelector
+                  selectedCurrency={currency}
+                  onSelect={setCurrency}
+                />
+                <View className="mt-4 pt-4 border-t border-white/5">
+                  <TBAToggle
+                    label="Price TBA"
+                    value={priceTBA}
+                    onChange={setPriceTBA}
+                    description="Mark if pricing is not yet decided"
+                  />
+                </View>
+              </View>
+
+              {!priceTBA &&
+                ticketTiers.map((tier, index) => (
+                  <View
+                    key={tier.id}
+                    className="bg-[#150d1e] border border-white/5 rounded-3xl p-5 mb-4 shadow-xl shadow-black/20"
+                  >
+                    <View className="flex-row justify-between items-center mb-4 pb-2 border-b border-white/5">
+                      <Text className="text-white font-bold text-lg">
+                        Tier {index + 1}
+                      </Text>
+                      {ticketTiers.length > 1 && (
+                        <TouchableOpacity
+                          onPress={() => removeTicketTier(tier.id)}
+                          className="bg-red-500/10 p-2 rounded-full"
+                        >
+                          <Ionicons
+                            name="trash"
+                            size={18}
+                            color="#ef4444"
+                          />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+
+                    <TextInput
+                      className="bg-[#09030e] border border-white/5 rounded-2xl px-5 py-4 text-white mb-4"
+                      placeholder="Tier name (e.g., VIP, General)"
+                      placeholderTextColor="#666"
+                      value={tier.name}
+                      onChangeText={(val) =>
+                        updateTicketTier(tier.id, "name", val)
+                      }
+                    />
+
+                    <View className="flex-row gap-4">
+                      <TextInput
+                        className="flex-1 bg-[#09030e] border border-white/5 rounded-2xl px-5 py-4 text-white"
+                        placeholder={`Price (${currency})`}
+                        placeholderTextColor="#666"
+                        value={tier.price}
+                        onChangeText={(val) =>
+                          updateTicketTier(tier.id, "price", val)
+                        }
+                        keyboardType="numeric"
+                      />
+                      <TextInput
+                        className="flex-1 bg-[#09030e] border border-white/5 rounded-2xl px-5 py-4 text-white"
+                        placeholder="Quantity"
+                        placeholderTextColor="#666"
+                        value={tier.quantity}
+                        onChangeText={(val) =>
+                          updateTicketTier(tier.id, "quantity", val)
+                        }
+                        keyboardType="numeric"
+                      />
+                    </View>
+                  </View>
+                ))}
+
+              {!priceTBA && (
+                <TouchableOpacity
+                  onPress={addTicketTier}
+                  activeOpacity={0.8}
+                  className="flex-row items-center justify-center bg-[#150d1e] border border-purple-500/20 rounded-2xl py-4 mt-2"
+                >
+                  <Ionicons
+                    name="add-circle"
+                    size={22}
+                    color="#a855f7"
+                  />
+                  <Text className="text-purple-400 font-bold ml-2.5 text-base">
+                    Add Another Tier
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
+          {/* Step 5: Preview */}
+          {currentStep === 5 && (
+            <View className="animate-fade-in mb-6">
+              <View className="mb-8">
+                <Text className="text-purple-400 text-sm font-bold uppercase tracking-widest mb-2">Step 5</Text>
+                <Text className="text-white text-4xl font-extrabold mb-2 tracking-tight">
+                  Preview
+                </Text>
+                <Text className="text-gray-400 text-base">
+                  Review before publishing
+                </Text>
+              </View>
+
+              {/* Flyer Preview */}
+              {mediaGallery.length > 0 && (
+                <ExpoImage
+                  source={{ uri: mediaGallery[0].uri }}
+                  className="w-full rounded-3xl mb-6 border border-white/5"
+                  style={{ aspectRatio: 4 / 5 }}
+                />
+              )}
+
+              {/* Party Details */}
+              <View className="bg-[#150d1e] border border-white/5 rounded-3xl p-6 mb-6">
+                <Text className="text-white text-2xl font-extrabold mb-3">
+                  {title}
+                </Text>
+                {description && (
+                  <Text className="text-gray-400 text-sm mb-5 leading-relaxed">
+                    {description}
+                  </Text>
+                )}
+
+                <View className="flex-row items-center mb-3 bg-[#09030e] self-start px-3 py-1.5 rounded-full border border-white/5">
+                  <Ionicons name="calendar-outline" size={14} color="#a855f7" />
+                  <Text className="text-gray-200 text-xs font-semibold ml-2">
+                    {dateTBA ? "Date TBA" : `${startDate} at ${startTime}`}
+                  </Text>
+                </View>
+
+                <View className="flex-row items-center mb-5 bg-[#09030e] self-start px-3 py-1.5 rounded-full border border-white/5">
+                  <Ionicons name="location-outline" size={14} color="#a855f7" />
+                  <Text className="text-gray-200 text-xs font-semibold ml-2">
+                    {locationTBA ? "Location TBA" : `${location}, ${city}`}
+                  </Text>
+                </View>
+
+                <View className="flex-row flex-wrap gap-2 pt-4 border-t border-white/5">
+                  {selectedGenres.slice(0, 3).map((genre) => (
+                    <View
+                      key={genre}
+                      className="bg-purple-600/10 border border-purple-500/20 px-3 py-1.5 rounded-full"
+                    >
+                      <Text className="text-purple-300 font-semibold text-xs">{genre}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+
+              {/* Ticket Tiers Preview */}
+              <View className="bg-[#150d1e] border border-white/5 rounded-3xl p-6">
+                <Text className="text-white font-extrabold text-lg mb-4">Ticket Tiers</Text>
+                {priceTBA ? (
+                  <Text className="text-gray-500 font-medium italic bg-[#09030e] p-4 rounded-xl">
+                    Price To Be Announced
+                  </Text>
+                ) : (
+                  <View className="bg-[#09030e] rounded-2xl overflow-hidden border border-white/5">
+                  {ticketTiers.map((tier, index) => (
+                    <View
+                      key={tier.id}
+                      className={`flex-row justify-between items-center p-4 ${index !== ticketTiers.length - 1 ? 'border-b border-white/5' : ''}`}
+                    >
+                      <Text className="text-gray-300 font-semibold">{tier.name}</Text>
+                      <Text className="text-white font-bold">
+                        ₦{tier.price} <Text className="text-gray-500 font-normal">({tier.quantity})</Text>
+                      </Text>
+                    </View>
+                  ))}
+                  </View>
+                )}
+              </View>
+            </View>
+          )}
 
           {/* Navigation Buttons */}
-          <View className="mt-8 gap-3">
+          <View className="mt-8 gap-4 px-2">
             {currentStep < 5 ? (
               <TouchableOpacity
                 onPress={handleNext}
-                className="bg-purple-600 py-4 rounded-xl items-center"
+                activeOpacity={0.8}
+                className="bg-white py-4 flex-row justify-center rounded-2xl items-center shadow-lg shadow-white/10"
               >
-                <Text className="text-white text-lg font-bold">Continue</Text>
+                <Text className="text-black text-lg font-extrabold pb-1">Continue</Text>
               </TouchableOpacity>
             ) : (
               <TouchableOpacity
                 onPress={handlePublish}
                 disabled={publishing}
-                className="bg-purple-600 py-4 rounded-xl items-center"
+                activeOpacity={0.8}
+                className="bg-purple-600 py-4 flex-row justify-center rounded-2xl items-center shadow-lg shadow-purple-600/30"
               >
                 {publishing ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
-                  <Text className="text-white text-lg font-bold">
-                    Publish Party
+                  <Text className="text-white text-lg font-extrabold flex-row items-center pb-1">
+                    🚀 Publish Party
                   </Text>
                 )}
               </TouchableOpacity>
@@ -996,9 +1263,10 @@ export default function CreatePartyScreen() {
             {currentStep > 1 && currentStep < 5 && (
               <TouchableOpacity
                 onPress={handleBack}
-                className="bg-white/10 py-4 rounded-xl items-center"
+                activeOpacity={0.7}
+                className="py-3 items-center"
               >
-                <Text className="text-white font-semibold">Back</Text>
+                <Text className="text-gray-400 font-bold">Cancel / Back</Text>
               </TouchableOpacity>
             )}
           </View>

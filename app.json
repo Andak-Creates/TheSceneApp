@@ -1,19 +1,24 @@
 {
   "expo": {
-    "name": "partiesAt",
-    "slug": "partiesAt",
+    "name": "TheScene",
+    "slug": "TheScene",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/partyBg.png",
-    "scheme": "partiesat",
+    "scheme": "thescene",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.vindi.thescene",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE"
+        "foregroundImage": "./assets/images/partyBg.png",
+        "backgroundColor": "#191022"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
@@ -35,11 +40,20 @@
           }
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-video",
+      "expo-localization",
+      "expo-location"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": false
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "ee9adc0c-ce11-421c-98c7-766084d5e5a6"
+      }
     }
   }
 }
