@@ -1,10 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
+import { Image as ExpoImage } from "expo-image";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   RefreshControl,
   Text,
   TouchableOpacity,
@@ -28,9 +28,11 @@ interface Ticket {
     id: string;
     title: string;
     flyer_url: string;
-    date: string;
-    location: string;
-    city: string;
+    date: string | null;
+    location: string | null;
+    city: string | null;
+    date_tba?: boolean;
+    location_tba?: boolean;
     host: {
       username: string;
     };
@@ -67,7 +69,9 @@ export default function MyTicketsScreen() {
             title,
             flyer_url,
             date,
+            date_tba,
             location,
+            location_tba,
             city,
             host:profiles!host_id (username)
           )
@@ -92,7 +96,8 @@ export default function MyTicketsScreen() {
     fetchTickets();
   };
 
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString: string | null) => {
+    if (!dateString) return "Date TBA";
     const date = new Date(dateString);
     return date.toLocaleDateString("en-US", {
       weekday: "short",
@@ -102,7 +107,8 @@ export default function MyTicketsScreen() {
     });
   };
 
-  const formatTime = (dateString: string) => {
+  const formatTime = (dateString: string | null) => {
+    if (!dateString) return "";
     const date = new Date(dateString);
     const hours = date.getHours();
     const minutes = date.getMinutes();
@@ -112,19 +118,25 @@ export default function MyTicketsScreen() {
     return `${displayHours}:${displayMinutes} ${ampm}`;
   };
 
-  const upcomingTickets = tickets.filter(
-    (t) => new Date(t.party.date) >= new Date(),
-  );
-  const pastTickets = tickets.filter(
-    (t) => new Date(t.party.date) < new Date(),
-  );
+  const upcomingTickets = tickets.filter((t) => {
+    if (t.party.date_tba || !t.party.date) return true;
+    return new Date(t.party.date) >= new Date();
+  });
+
+  const pastTickets = tickets.filter((t) => {
+    if (t.party.date_tba || !t.party.date) return false;
+    return new Date(t.party.date) < new Date();
+  });
 
   const currentTickets =
     activeTab === "upcoming" ? upcomingTickets : pastTickets;
 
   const renderTicketCard = ({ item: ticket }: { item: Ticket }) => {
     const isExpanded = expandedTicket === ticket.id;
-    const isPast = new Date(ticket.party.date) < new Date();
+    const isPast =
+      !ticket.party.date_tba &&
+      ticket.party.date &&
+      new Date(ticket.party.date) < new Date();
 
     return (
       <View className="mb-4 bg-white/5 rounded-2xl overflow-hidden">
@@ -134,11 +146,18 @@ export default function MyTicketsScreen() {
           activeOpacity={0.8}
         >
           <View className="flex-row p-4">
-            <Image
-              source={{ uri: ticket.party.flyer_url }}
-              className="w-20 h-24 rounded-xl"
-              resizeMode="cover"
-            />
+            {(ticket.party.flyer_url && (ticket.party.flyer_url.startsWith('http') || ticket.party.flyer_url.startsWith('https'))) ? (
+              <ExpoImage
+                source={{ uri: ticket.party.flyer_url }}
+                className="w-20 h-24 rounded-xl"
+                contentFit="cover"
+                transition={200}
+              />
+            ) : (
+              <View className="w-20 h-24 rounded-xl bg-gray-800 items-center justify-center">
+                <Ionicons name="image-outline" size={24} color="#444" />
+              </View>
+            )}
             <View className="ml-4 flex-1">
               <Text
                 className="text-white font-bold text-base mb-1"
@@ -153,15 +172,18 @@ export default function MyTicketsScreen() {
               <View className="flex-row items-center mb-1">
                 <Ionicons name="calendar-outline" size={14} color="#9ca3af" />
                 <Text className="text-gray-400 text-xs ml-1">
-                  {formatDate(ticket.party.date)} •{" "}
-                  {formatTime(ticket.party.date)}
+                  {ticket.party.date_tba
+                    ? "Date TBA"
+                    : `${formatDate(ticket.party.date)} • ${formatTime(ticket.party.date)}`}
                 </Text>
               </View>
 
               <View className="flex-row items-center">
                 <Ionicons name="location-outline" size={14} color="#9ca3af" />
                 <Text className="text-gray-400 text-xs ml-1" numberOfLines={1}>
-                  {ticket.party.location}, {ticket.party.city}
+                  {ticket.party.location_tba
+                    ? "Location TBA"
+                    : `${ticket.party.location}, ${ticket.party.city}`}
                 </Text>
               </View>
             </View>
@@ -380,25 +402,26 @@ export default function MyTicketsScreen() {
             tintColor="#8B5CF6"
           />
         }
-        ListEmptyComponent={
-          <View className="items-center justify-center py-20">
-            <View className="w-20 h-20 rounded-full bg-white/5 items-center justify-center mb-4">
-              <Ionicons name="ticket-outline" size={40} color="#666" />
+         ListEmptyComponent={
+          <View className="items-center justify-center py-20 px-10">
+            <View className="w-24 h-24 rounded-full bg-white/5 items-center justify-center mb-8 border border-white/5">
+              <Ionicons name="ticket" size={48} color="#a855f7" />
             </View>
-            <Text className="text-gray-400 text-lg mb-2">
+            <Text className="text-white text-2xl font-extrabold mb-3 text-center">
               No {activeTab} tickets
             </Text>
-            <Text className="text-gray-600 text-sm text-center px-8 mb-6">
+            <Text className="text-gray-500 text-base text-center leading-6 mb-8">
               {activeTab === "upcoming"
-                ? "Get tickets to parties and they'll show up here"
-                : "Tickets for attended parties will appear here"}
+                ? "Experience the vibe! Once you get tickets to a party, they'll appear here for easy access."
+                : "Looking back? Your history of attended parties will be stored safely here."}
             </Text>
             {activeTab === "upcoming" && (
               <TouchableOpacity
-                className="bg-purple-600 px-6 py-3 rounded-full"
+                className="bg-white py-4 px-10 rounded-2xl shadow-xl shadow-white/10"
+                activeOpacity={0.8}
                 onPress={() => router.push("/(app)/feed")}
               >
-                <Text className="text-white font-semibold">Browse Parties</Text>
+                <Text className="text-black font-extrabold text-base">Explore Parties</Text>
               </TouchableOpacity>
             )}
           </View>

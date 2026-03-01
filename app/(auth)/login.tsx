@@ -3,16 +3,16 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
-  ActivityIndicator,
-  ImageBackground,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    ImageBackground,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { useAuthStore } from "../../stores/authStore";
 
@@ -42,7 +42,6 @@ export default function LoginScreen() {
     if (signInError) {
       setError(signInError.message || "Invalid email or password");
     } else {
-      // Navigation is handled automatically by root layout
       setEmail("");
       setPassword("");
     }

@@ -1,14 +1,14 @@
 import { Ionicons } from "@expo/vector-icons";
+import { Image as ExpoImage } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  FlatList,
-  Image,
-  ScrollView,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    FlatList,
+    ScrollView,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "../../stores/authStore";
@@ -231,11 +231,22 @@ export default function HostProfileScreen() {
         router.push({ pathname: "/party/[id]", params: { id: item.id } })
       }
     >
-      <Image
-        source={{ uri: item.flyer_url }}
-        className="w-full rounded-2xl mb-2"
-        style={{ aspectRatio: 4 / 5 }}
-      />
+      {(item.flyer_url && (item.flyer_url.startsWith('http') || item.flyer_url.startsWith('https'))) ? (
+        <ExpoImage
+          source={{ uri: item.flyer_url }}
+          className="w-full rounded-2xl mb-2"
+          style={{ aspectRatio: 4 / 5 }}
+          contentFit="cover"
+          transition={200}
+        />
+      ) : (
+        <View 
+          className="w-full rounded-2xl mb-2 bg-gray-800 items-center justify-center"
+          style={{ aspectRatio: 4 / 5 }}
+        >
+          <Ionicons name="image-outline" size={48} color="#444" />
+        </View>
+      )}
       <Text className="text-white font-bold text-sm mb-1" numberOfLines={1}>
         {item.title}
       </Text>
@@ -281,9 +292,11 @@ export default function HostProfileScreen() {
         {/* Profile Info */}
         <View className="items-center mb-6">
           {profile.avatar_url ? (
-            <Image
+            <ExpoImage
               source={{ uri: profile.avatar_url }}
               className="w-24 h-24 rounded-full mb-4"
+              contentFit="cover"
+              transition={200}
             />
           ) : (
             <View className="w-24 h-24 rounded-full bg-purple-600 items-center justify-center mb-4">
@@ -312,8 +325,8 @@ export default function HostProfileScreen() {
             </Text>
           )}
 
-          {/* Follow Button */}
-          {user?.id !== hostId && (
+          {/* Action Buttons */}
+          {user?.id !== hostId ? (
             <TouchableOpacity
               onPress={handleFollow}
               className={`px-8 py-3 rounded-full ${
@@ -325,6 +338,14 @@ export default function HostProfileScreen() {
               <Text className="text-white font-semibold">
                 {isFollowing ? "Following" : "Follow"}
               </Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              onPress={() => router.push("/host/earnings")}
+              className="px-8 py-3 rounded-full bg-purple-600 flex-row items-center"
+            >
+              <Ionicons name="wallet-outline" size={20} color="#fff" />
+              <Text className="text-white font-bold ml-2">Earnings Dashboard</Text>
             </TouchableOpacity>
           )}
         </View>

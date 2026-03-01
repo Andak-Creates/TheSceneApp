@@ -25,7 +25,7 @@ export default function Index() {
     <View className="flex-1 bg-[#191022] items-center justify-center">
       {/* Logo or App Name */}
       <View className="mb-8">
-        <Text className="text-white text-5xl font-extrabold">PartiesAt</Text>
+        <Text className="text-white text-5xl font-extrabold">TheScene</Text>
         <Text className="text-purple-500 text-xl text-center mt-2">
           Where the vibes at? 🎉
         </Text>
