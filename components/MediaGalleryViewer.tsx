@@ -2,14 +2,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { VideoView, useVideoPlayer } from "expo-video";
 import React, { useRef, useState } from "react";
 import {
-    Dimensions,
-    FlatList,
-    Modal,
-    Image as RNImage,
-    ScrollView,
-    Text,
-    TouchableOpacity,
-    View,
+  Dimensions,
+  FlatList,
+  Modal,
+  Image as RNImage,
+  ScrollView,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { useAudioStore } from "../stores/audioStore";
 
@@ -31,6 +31,9 @@ interface MediaGalleryViewerProps {
   aspectRatio?: number;
   showDelete?: boolean;
   onDelete?: (id: string) => void;
+
+  isActive?: boolean;
+  instanceId?: string;  
 }
 
 export default function MediaGalleryViewer({
@@ -40,6 +43,8 @@ export default function MediaGalleryViewer({
   aspectRatio = 4 / 5,
   showDelete = false,
   onDelete,
+  isActive = true,   // ← add this
+  instanceId,        // ← add this
 }: MediaGalleryViewerProps) {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [fullscreen, setFullscreen] = useState(false);
@@ -65,31 +70,31 @@ export default function MediaGalleryViewer({
     }
   };
 
-  const renderItem = ({ item }: { item: MediaItem }) => (
-    <TouchableOpacity
-      activeOpacity={0.9}
-      onPress={onPress || (() => {})}
-      style={{ width: containerWidth, aspectRatio }}
-    >
-      {item.media_type === "image" ? (
-        <RNImage
-          source={{ uri: item.media_url }}
-          className="w-full h-full bg-gray-900"
-          resizeMode="cover"
+ const renderItem = ({ item }: { item: MediaItem }) => (
+  <TouchableOpacity
+    activeOpacity={0.9}
+    onPress={onPress || (() => {})}
+    style={{ width: containerWidth, aspectRatio }}
+  >
+    {item.media_type === "image" ? (
+      <RNImage
+        source={{ uri: item.media_url }}
+        className="w-full h-full bg-gray-900"
+        resizeMode="cover"
+      />
+    ) : (
+      <View className="flex-1">
+        <VideoPlayer
+          videoUrl={item.media_url}
+          autoPlay={true}
+          loop={true}
+          isActive={isActive}  // ← now this will correctly reference the prop
         />
-      ) : (
-        <View className="flex-1">
-          <VideoPlayer
-            videoUrl={item.media_url}
-            autoPlay={true}
-            muted={true} // Fixed muted state handled inside VideoPlayer via store
-            loop={true}
-          />
-          <MuteToggleOverlay />
-        </View>
-      )}
-    </TouchableOpacity>
-  );
+        <MuteToggleOverlay />
+      </View>
+    )}
+  </TouchableOpacity>
+);
 
   return (
     <>
@@ -306,6 +311,7 @@ interface VideoPlayerProps {
   loop?: boolean;
   showControls?: boolean;
   fullscreen?: boolean;
+  isActive?: boolean;
 }
 
 function VideoPlayer({
@@ -315,16 +321,23 @@ function VideoPlayer({
   loop = true,
   showControls = false,
   fullscreen = false,
+  isActive = true
 }: VideoPlayerProps) {
   const { isMuted } = useAudioStore();
 
   const player = useVideoPlayer(videoUrl, (player) => {
     player.loop = loop;
     player.muted = isMuted;
-    if (autoPlay) {
-      player.play();
-    }
   });
+
+   // Pause/play based on whether this card is visible
+  React.useEffect(() => {
+    if (isActive && autoPlay) {
+      player.play();
+    } else {
+      player.pause();
+    }
+  }, [isActive]);
 
   // Effect to sync store mute state to player
   React.useEffect(() => {

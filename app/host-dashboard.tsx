@@ -29,6 +29,7 @@ interface Party {
   ticket_quantity: number;
   tickets_sold: number;
   date_tba?: boolean;
+  host_profile_id?: string | null;
 }
 
 // ✅ ADD TIER INFO TO PARTY
@@ -116,14 +117,41 @@ export default function HostDashboardScreen() {
     if (!user) return;
 
     try {
-      // Fetch parties
-      const { data: partiesData, error: partiesError } = await supabase
-        .from("parties")
-        .select("*")
-        .eq("host_id", user.id)
-        .order("date", { ascending: true });
+      // 1. Fetch host profiles where user is owner or admin
+      const { data: ownedProfiles } = await supabase
+        .from("host_profiles")
+        .select("id")
+        .eq("owner_id", user.id);
 
-      if (partiesError) throw partiesError;
+      const { data: adminProfiles } = await supabase
+        .from("host_admins")
+        .select("host_profile_id")
+        .eq("user_id", user.id);
+
+      const profileIds = [
+        ...(ownedProfiles?.map(p => p.id) || []),
+        ...(adminProfiles?.map(p => p.host_profile_id) || [])
+      ];
+
+      // fallback to legacy host_id if no profileIds found (for backward compatibility during migration)
+      let partiesData = [];
+      if (profileIds.length > 0) {
+        const { data, error } = await supabase
+          .from("parties")
+          .select("*")
+          .or(`host_profile_id.in.(${profileIds.join(',')}),host_id.eq.${user.id}`)
+          .order("date", { ascending: true });
+        if (error) throw error;
+        partiesData = data || [];
+      } else {
+        const { data, error } = await supabase
+          .from("parties")
+          .select("*")
+          .eq("host_id", user.id)
+          .order("date", { ascending: true });
+        if (error) throw error;
+        partiesData = data || [];
+      }
 
       // ✅ FETCH TIER DATA FOR EACH PARTY
       const partiesWithTiers = await Promise.all(
@@ -168,16 +196,20 @@ export default function HostDashboardScreen() {
         (p) => p.date_tba || new Date(p.date) >= new Date(),
       ).length;
 
-      // Get reviews
-      const { data: reviews } = await supabase
-        .from("reviews")
-        .select("rating")
-        .eq("host_id", user.id);
+      // Get reviews (aggregated for all parties this user manages)
+      const partyIds = partiesWithTiers.map(p => p.id);
+      let avgRating = 0;
+      if (partyIds.length > 0) {
+        const { data: reviews } = await supabase
+          .from("reviews")
+          .select("rating")
+          .in("party_id", partyIds);
 
-      const avgRating =
-        reviews && reviews.length
-          ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
-          : 0;
+        avgRating =
+          reviews && reviews.length
+            ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
+            : 0;
+      }
 
       setAnalytics({
         totalRevenue,
@@ -187,7 +219,7 @@ export default function HostDashboardScreen() {
         upcomingParties: upcomingCount,
       });
 
-      // ✅ FETCH BALANCE
+      // ✅ FETCH BALANCE (Balance is still per-user for now, but linked to host earnings)
       const { data: balanceData } = await supabase
         .from("host_balances")
         .select("*")
@@ -213,7 +245,7 @@ export default function HostDashboardScreen() {
           *,
           party:parties(title)
         `)
-        .eq("host_id", user.id)
+        .eq("host_id", user.id) // Personal earnings for managing parties
         .order("created_at", { ascending: false })
         .limit(10);
       
@@ -1019,11 +1051,47 @@ export default function HostDashboardScreen() {
 
         <TouchableOpacity
           className="bg-white/5 rounded-2xl p-4 flex-row items-center justify-between mb-3"
-          onPress={() => router.push("/(app)/createParty")}
+          onPress={() => router.push("/(app)/host-profile-setup")}
         >
           <View className="flex-row items-center">
-            <Ionicons name="add-circle" size={24} color="#8B5CF6" />
-            <Text className="text-white font-semibold ml-3">Create Party</Text>
+            <Ionicons name="business" size={24} color="#8B5CF6" />
+            <Text className="text-white font-semibold ml-3">Manage Host Profiles</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#666" />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          className="bg-white/5 rounded-2xl p-4 flex-row items-center justify-between mb-3"
+          onPress={() => {
+            if (activeTab === "scanner" && selectedPartyForScan) {
+              const party = parties.find(p => p.id === selectedPartyForScan);
+              if (party?.host_profile_id) {
+                router.push({
+                  pathname: "/(app)/host-profile-admins",
+                  params: { hostProfileId: party.host_profile_id }
+                } as any);
+              } else {
+                Alert.alert("Note", "Please select a party first or ensure the party has a host profile.");
+              }
+            } else if (parties.length > 0) {
+              // Just pick the first one's profile if it exists
+              const party = parties.find(p => p.host_profile_id);
+              if (party?.host_profile_id) {
+                router.push({
+                  pathname: "/(app)/host-profile-admins",
+                  params: { hostProfileId: party.host_profile_id }
+                } as any);
+              } else {
+                Alert.alert("Note", "No host profile found to manage.");
+              }
+            } else {
+              Alert.alert("Note", "You haven't created any parties yet.");
+            }
+          }}
+        >
+          <View className="flex-row items-center">
+            <Ionicons name="people-circle" size={24} color="#8B5CF6" />
+            <Text className="text-white font-semibold ml-3">Manage Admins</Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color="#666" />
         </TouchableOpacity>

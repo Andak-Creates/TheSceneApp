@@ -161,32 +161,32 @@ export default function TicketPurchaseScreen() {
     const amountInSmallestUnit = totalPrice;
 
     popup.checkout({
-      email: user.email || "",
-      amount: amountInSmallestUnit,
-      // @ts-ignore - The Paystack checkout params support currency but types might be outdated
-      currency: paystackCurrency,
-      metadata: {
-        party_id: partyId,
-        party_title: party.title,
-        tier_id: selectedTier,
-        tier_name: tier.name,
-        quantity,
-        custom_fields: [
-          { display_name: "Party", variable_name: "party_title", value: party.title },
-          { display_name: "Ticket Type", variable_name: "tier_name", value: tier.name },
-          { display_name: "Quantity", variable_name: "quantity", value: String(quantity) },
-        ],
-      },
-      onSuccess: async (res) => {
-        const ref = (res as any).transactionRef || (res as any).transaction || (res as any).trans || "";
-        await handlePaymentSuccess(ref);
-      },
-      onCancel: () => {
-        setPurchasing(false);
-        pendingPurchase.current = null;
-        Alert.alert("Cancelled", "Your ticket purchase was cancelled.");
-      },
-    });
+  email: user.email || "",
+  amount: amountInSmallestUnit,
+  currency: paystackCurrency,
+  channels: ["card", "bank_transfer", "ussd", "mobile_money", "bank"],
+  metadata: {
+    party_id: partyId,
+    party_title: party.title,
+    tier_id: selectedTier,
+    tier_name: tier.name,
+    quantity,
+    custom_fields: [
+      { display_name: "Party", variable_name: "party_title", value: party.title },
+      { display_name: "Ticket Type", variable_name: "tier_name", value: tier.name },
+      { display_name: "Quantity", variable_name: "quantity", value: String(quantity) },
+    ],
+  },
+  onSuccess: async (res: any) => {
+    const ref = res.transactionRef || res.transaction || res.trans || "";
+    await handlePaymentSuccess(ref);
+  },
+  onCancel: () => {
+    setPurchasing(false);
+    pendingPurchase.current = null;
+    Alert.alert("Cancelled", "Your ticket purchase was cancelled.");
+  },
+} as any);
   };
 
   const handlePaymentSuccess = async (reference: string) => {

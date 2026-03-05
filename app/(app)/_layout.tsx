@@ -60,6 +60,7 @@ export default function AppLayout() {
         name="settings/preferences"
         options={{
           href: null,
+          tabBarStyle: { display: "none" },
         }}
       />
 
@@ -67,7 +68,9 @@ export default function AppLayout() {
         name="host-verification"
         options={{
           href: null,
+          tabBarStyle: { display: "none" },
         }}
+        
       />
 
       <Tabs.Screen
@@ -81,6 +84,22 @@ export default function AppLayout() {
               <FontAwesome6 name="plus" size={20} color="#000" />
             </View>
           ),
+          tabBarStyle: { display: "none" },
+        }}
+      />
+
+      <Tabs.Screen
+        name="host-profile-setup"
+        options={{
+          href: null,
+          tabBarStyle: { display: "none" },
+        }}
+      />
+
+      <Tabs.Screen
+        name="host-profile-admins"
+        options={{
+          href: null,
           tabBarStyle: { display: "none" },
         }}
       />

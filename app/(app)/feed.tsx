@@ -1,15 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Image as ExpoImage } from "expo-image";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    FlatList,
-    Image as RNImage,
-    RefreshControl,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  FlatList, Image, Image as RNImage,
+  RefreshControl,
+  Text,
+  TouchableOpacity,
+  View
 } from "react-native";
 import MediaGalleryViewer from "../../components/MediaGalleryViewer";
 import { getCurrencySymbol } from "../../lib/currency";
@@ -43,6 +41,11 @@ interface Party {
     avatar_url: string | null;
     is_host: boolean;
   };
+  host_profile?: {
+    id: string;
+    name: string;
+    avatar_url: string | null;
+  };
   media?: {
     id: string;
     media_url: string;
@@ -66,6 +69,15 @@ export default function FeedScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  const [activePartyId, setActivePartyId] = useState<string | null>(null);
+
+const viewabilityConfig = { itemVisiblePercentThreshold: 60 };
+const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
+  if (viewableItems.length > 0) {
+    setActivePartyId(viewableItems[0].item.id);
+  }
+}).current;
+
   useEffect(() => {
     fetchParties();
   }, [user?.id]);
@@ -83,6 +95,11 @@ export default function FeedScreen() {
           username,
           avatar_url,
           is_host
+        ),
+        host_profile:host_profiles!host_profile_id (
+          id,
+          name,
+          avatar_url
         ),
         media:party_media(*)
       `,
@@ -331,25 +348,26 @@ export default function FeedScreen() {
           onPress={() =>
             router.push({
               pathname: "/host/[id]",
-              params: { id: party.host_id },
+              params: { id: party.host_profile?.id ?? party.host_id }
             })
           }
         >
-          {party.host?.avatar_url ? (
-            <ExpoImage
-              source={{ uri: party.host.avatar_url }}
-              className="w-11 h-11 rounded-full border border-white/10"
-            />
+          {party.host_profile?.avatar_url ? (
+            <Image
+  source={{ uri: party.host_profile.avatar_url }}
+  style={{ width: 40, height: 40, borderRadius: 48 }}
+  resizeMode="cover"
+/>
           ) : (
             <View className="w-11 h-11 rounded-full bg-purple-600 items-center justify-center border border-white/10">
               <Text className="text-white font-bold text-lg">
-                {party.host?.username.charAt(0).toUpperCase()}
+                {(party.host_profile?.name || "?").charAt(0).toUpperCase()}
               </Text>
             </View>
           )}
           <View className="ml-3 flex-1">
-            <Text className="text-gray-100 font-bold text-base">
-              {party.host?.username}
+            <Text className="text-white font-extrabold text-base tracking-tight">
+              {party.host_profile?.name || "Unknown Brand"}
             </Text>
             <Text className="text-gray-500 text-xs">
               {formatDate(party.created_at)}
@@ -368,11 +386,14 @@ export default function FeedScreen() {
               {party.media && party.media.length > 0 ? (
                 <MediaGalleryViewer
                   media={party.media}
-                  onPress={() =>
+                   isActive={party.id === activePartyId}
+  instanceId={party.id}
+                  onPress={() =>{
+                    setActivePartyId(null);
                     router.push({
                       pathname: "/party/[id]",
                       params: { id: party.id },
-                    })
+                    })}
                   }
                   aspectRatio={4 / 5}
                 />
@@ -544,6 +565,8 @@ export default function FeedScreen() {
             </View>
           </View>
         )}
+        onViewableItemsChanged={onViewableItemsChanged}
+  viewabilityConfig={viewabilityConfig}
         keyExtractor={(item) => item.id}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 100 }}

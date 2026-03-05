@@ -1,6 +1,7 @@
 import CommentsBottomSheet from "@/components/CommentsBottomSheet";
 import MediaGalleryViewer from "@/components/MediaGalleryViewer";
 import TBAToggle from "@/components/TBAToggle";
+import { useAudioStore } from "@/stores/audioStore";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { decode } from "base64-arraybuffer";
@@ -9,25 +10,25 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Dimensions,
-    Linking,
-    Modal,
-    Platform,
-    Image as RNImage,
-    ScrollView,
-    Share,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  Linking,
+  Modal,
+  Platform,
+  Image as RNImage,
+  ScrollView,
+  Share,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
-    useAnimatedStyle,
-    useSharedValue,
-    withSpring
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring
 } from "react-native-reanimated";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "../../stores/authStore";
@@ -60,6 +61,11 @@ interface Party {
     full_name: string | null;
     avatar_url: string | null;
     is_host: boolean;
+  };
+  host_profile?: {
+    id: string;
+    name: string;
+    avatar_url: string | null;
   };
   likes_count?: number;
   comments_count?: number;
@@ -102,6 +108,12 @@ export default function PartyDetailScreen() {
   const { user } = useAuthStore();
   const partyId = params.id as string;
   const viewRecorded = useRef(false);
+  const { setActiveVideoId } = useAudioStore();
+
+  useEffect(() => {
+  // Kill any feed video when this screen mounts
+  setActiveVideoId(null);
+}, []);
 
   const [party, setParty] = useState<Party | null>(null);
   const [loading, setLoading] = useState(true);
@@ -229,6 +241,11 @@ export default function PartyDetailScreen() {
             full_name,
             avatar_url,
             is_host
+          ),
+          host_profile:host_profiles!host_profile_id (
+            id,
+            name,
+            avatar_url
           ),
           media:party_media(*)
         `,
@@ -726,7 +743,7 @@ export default function PartyDetailScreen() {
                )}
                
                <Text className="text-purple-400 font-semibold mb-2">
-                 Hosted by {party.host?.username}
+                 Hosted by {party.host_profile?.name || "Unknown Brand"}
                </Text>
 
               {isEditing ? (

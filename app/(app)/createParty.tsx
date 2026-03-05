@@ -7,16 +7,16 @@ import { Image as ExpoImage } from "expo-image";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    ScrollView,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { GooglePlacesAutocomplete } from "react-native-google-places-autocomplete";
 import { getUserCurrency } from "../../lib/currency";
@@ -94,44 +94,73 @@ export default function CreatePartyScreen() {
   const [publishing, setPublishing] = useState(false);
   const [verificationChecked, setVerificationChecked] = useState(false);
 
-  // Check host verification before allowing party creation
+  // Host Profile State
+  const [hostProfiles, setHostProfiles] = useState<any[]>([]);
+  const [selectedHostProfile, setSelectedHostProfile] = useState<string | null>(null);
+  const [loadingProfiles, setLoadingProfiles] = useState(true);
+
+  // Combined check for verification and host profiles
   useEffect(() => {
-    const checkVerification = async () => {
+    const checkHostingReady = async () => {
       if (!user) return;
+      setLoadingProfiles(true);
       try {
+        // 1. Check Verification Status
         const { data: profileRow } = await supabase
           .from("profiles")
           .select("host_verified_at, host_verification_status, is_host")
           .eq("id", user.id)
           .single();
 
-        const hasVerifiedProfile = profileRow?.host_verified_at || profileRow?.host_verification_status === "approved";
+        const isVerified = (profileRow?.host_verified_at !== null && profileRow?.host_verified_at !== undefined) || 
+                          profileRow?.host_verification_status === "approved" || 
+                          profileRow?.is_host;
 
-        if (hasVerifiedProfile || profileRow?.is_host) {
-          setVerificationChecked(true);
+        if (!isVerified) {
+          const { data: verification } = await supabase
+            .from("host_verifications")
+            .select("status")
+            .eq("user_id", user.id)
+            .maybeSingle();
+
+          if (verification?.status !== "approved") {
+            router.replace("/(app)/host-verification");
+            return;
+          }
+        }
+
+        // 2. Check for Host Profiles (Brands)
+        const { data: profiles, error: profileError } = await supabase
+          .from("host_profiles")
+          .select("*")
+          .eq("owner_id", user.id);
+
+        if (profileError) throw profileError;
+
+        if (!profiles || profiles.length === 0) {
+          // No brand profiles found - redirect to setup
+          Alert.alert(
+            "Final Step", 
+            "You're verified! Now, create a host brand (profile) to publish your parties.",
+            [{ text: "Setup Brand", onPress: () => router.replace("/(app)/host-profile-setup") }]
+          );
           return;
         }
 
-        const { data: verification } = await supabase
-          .from("host_verifications")
-          .select("status")
-          .eq("user_id", user.id)
-          .maybeSingle();
-
-        if (verification?.status === "approved" || hasVerifiedProfile) {
-          setVerificationChecked(true);
-          return;
-        }
-
-        router.replace("/(app)/host-verification");
-      } catch {
-        router.replace("/(app)/host-verification");
-      } finally {
+        setHostProfiles(profiles);
+        setSelectedHostProfile(profiles[0].id);
         setVerificationChecked(true);
+      } catch (err) {
+        console.error("Hosting check failed:", err);
+        setError("Failed to verify hosting status");
+      } finally {
+        setLoadingProfiles(false);
       }
     };
-    checkVerification();
+
+    checkHostingReady();
   }, [user?.id]);
+
 
   // Reset form on mount
   useEffect(() => {
@@ -165,13 +194,16 @@ export default function CreatePartyScreen() {
     ]);
     
     // Fetch and set user's preferred currency
+    let prefCurr = "NGN";
     if (user?.id) {
-      const preferredCurrency = await getUserCurrency(user.id);
-      setCurrency(preferredCurrency);
+      prefCurr = await getUserCurrency(user.id);
+      setCurrency(prefCurr);
     } else {
       setCurrency("NGN");
     }
     
+    setCurrency(prefCurr);
+    setSelectedHostProfile(hostProfiles.length > 0 ? hostProfiles[0].id : null);
     setError("");
   };
 
@@ -281,6 +313,8 @@ export default function CreatePartyScreen() {
           return "Please enter the location or mark as TBA";
         if (!locationTBA && !city.trim())
           return "Please enter the city or mark as TBA";
+        if (!selectedHostProfile)
+          return "Please select a host profile or create one first";
         if (!dateTBA) {
           if (!startDate.trim())
             return "Please enter start date or mark as TBA";
@@ -433,6 +467,7 @@ export default function CreatePartyScreen() {
           music_genres: selectedGenres,
           vibes: selectedVibes,
           is_published: true,
+          host_profile_id: selectedHostProfile,
         })
         .select()
         .single();
@@ -600,6 +635,46 @@ export default function CreatePartyScreen() {
                   value={title}
                   onChangeText={setTitle}
                 />
+              </View>
+
+              <View className="mb-4">
+                <Text className="text-white text-sm font-semibold mb-2">
+                  Host Profile *
+                </Text>
+                {loadingProfiles ? (
+                  <ActivityIndicator size="small" color="#a855f7" />
+                ) : hostProfiles.length > 0 ? (
+                  <View className="flex-row flex-wrap gap-2">
+                    {hostProfiles.map((hp) => (
+                      <TouchableOpacity
+                        key={hp.id}
+                        onPress={() => setSelectedHostProfile(hp.id)}
+                        className={`px-4 py-2 rounded-xl border ${
+                          selectedHostProfile === hp.id
+                            ? "bg-purple-600 border-purple-500"
+                            : "bg-white/5 border-white/10"
+                        }`}
+                      >
+                        <Text className="text-white font-medium">{hp.name}</Text>
+                      </TouchableOpacity>
+                    ))}
+                    <TouchableOpacity
+                      onPress={() => router.push("/(app)/host-profile-setup")}
+                      className="px-4 py-2 rounded-xl border border-dashed border-white/20 bg-white/5"
+                    >
+                      <Text className="text-gray-400 font-medium">+ New Profile</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    onPress={() => router.push("/(app)/host-profile-setup")}
+                    className="bg-purple-600/20 border border-dashed border-purple-500/50 rounded-xl p-4 items-center"
+                  >
+                    <Ionicons name="add-circle" size={24} color="#a855f7" />
+                    <Text className="text-purple-400 font-bold mt-2">Create Host Profile</Text>
+                    <Text className="text-gray-400 text-xs text-center mt-1">You need a host profile to publish parties</Text>
+                  </TouchableOpacity>
+                )}
               </View>
 
               <View className="mb-4">
@@ -1223,7 +1298,7 @@ export default function CreatePartyScreen() {
                     >
                       <Text className="text-gray-300 font-semibold">{tier.name}</Text>
                       <Text className="text-white font-bold">
-                        ₦{tier.price} <Text className="text-gray-500 font-normal">({tier.quantity})</Text>
+                        {currency} {tier.price} <Text className="text-gray-500 font-normal">({tier.quantity})</Text>
                       </Text>
                     </View>
                   ))}

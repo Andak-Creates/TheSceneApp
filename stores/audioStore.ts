@@ -1,13 +1,16 @@
+// stores/audioStore.ts
 import { create } from "zustand";
 
-interface AudioState {
+interface AudioStore {
   isMuted: boolean;
+  activeVideoId: string | null;
   toggleMute: () => void;
-  setMuted: (muted: boolean) => void;
+  setActiveVideoId: (id: string | null) => void;
 }
 
-export const useAudioStore = create<AudioState>((set) => ({
+export const useAudioStore = create<AudioStore>((set) => ({
   isMuted: true,
+  activeVideoId: null,
   toggleMute: () => set((state) => ({ isMuted: !state.isMuted })),
-  setMuted: (muted: boolean) => set({ isMuted: muted }),
+  setActiveVideoId: (id) => set({ activeVideoId: id }),
 }));

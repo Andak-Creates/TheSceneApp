@@ -35,33 +35,47 @@ export default function SettingsScreen() {
     ]);
   };
 
-  const handleDeleteAccount = async () => {
-    Alert.alert(
-      "Delete Account",
-      "This is permanent. All your profile data, tickets, and host history will be deleted. Are you absolutely sure?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete My Account",
-          style: "destructive",
-          onPress: async () => {
-            setSigningOut(true);
-            try {
-              const { error } = await supabase.from("profiles").delete().eq("id", user?.id);
-              if (error) throw error;
-              await signOut();
-              router.replace("/(auth)/welcome");
-            } catch (err) {
-              console.error("Delete account error:", err);
-              Alert.alert("Error", "Failed to delete account records.");
-            } finally {
-              setSigningOut(false);
-            }
-          },
+const handleDeleteAccount = async () => {
+  Alert.alert(
+    "Delete Account",
+    "This is permanent. All your profile data, tickets, parties, and host history will be deleted. Are you absolutely sure?",
+    [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete My Account",
+        style: "destructive",
+        onPress: () => {
+          // Second confirmation
+          Alert.alert(
+            "Final Warning",
+            "This cannot be undone. Your account will be permanently deleted.",
+            [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Yes, Delete Everything",
+                style: "destructive",
+                onPress: async () => {
+                  setSigningOut(true);
+                  try {
+                    const { error } = await supabase.rpc("delete_user_account");
+                    if (error) throw error;
+                    await signOut();
+                    router.replace("/(auth)/welcome");
+                  } catch (err: any) {
+                    console.error("Delete account error:", err);
+                    Alert.alert("Error", err.message || "Failed to delete account. Please try again.");
+                  } finally {
+                    setSigningOut(false);
+                  }
+                },
+              },
+            ]
+          );
         },
-      ]
-    );
-  };
+      },
+    ]
+  );
+};
 
   const SettingItem = ({ 
     icon, 
@@ -129,11 +143,40 @@ export default function SettingsScreen() {
               onPress={() => router.push("/host/bank-account")} 
             />
             {profile?.is_host && (
-              <SettingItem 
-                icon="stats-chart-outline" 
-                label="Host Analytics" 
-                onPress={() => router.push("/host-dashboard")} 
-              />
+              <>
+                <SettingItem 
+                  icon="stats-chart-outline" 
+                  label="Host Analytics" 
+                  onPress={() => router.push("/host-dashboard")} 
+                />
+                <SettingItem 
+                  icon="business-outline" 
+                  label="Manage Host Profiles" 
+                  onPress={() => router.push("/(app)/host-profile-setup")} 
+                />
+                <SettingItem 
+                  icon="people-circle-outline" 
+                  label="Manage Admins" 
+                  onPress={async () => {
+                    // Fetch first host profile to manage
+                    const { data } = await supabase
+                      .from("host_profiles")
+                      .select("id")
+                      .eq("owner_id", user?.id)
+                      .limit(1)
+                      .single();
+                    
+                    if (data?.id) {
+                      router.push({
+                        pathname: "/(app)/host-profile-admins",
+                        params: { hostProfileId: data.id }
+                      } as any);
+                    } else {
+                      Alert.alert("No Profile", "Please create a host profile first.");
+                    }
+                  }} 
+                />
+              </>
             )}
           </View>
         </View>

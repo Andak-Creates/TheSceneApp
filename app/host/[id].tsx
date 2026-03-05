@@ -3,24 +3,28 @@ import { Image as ExpoImage } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    FlatList,
-    ScrollView,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  FlatList,
+  Image,
+  ScrollView,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "../../stores/authStore";
 
 interface HostProfile {
   id: string;
-  username: string;
-  full_name: string | null;
+  name: string;
   avatar_url: string | null;
   bio: string | null;
-  is_host: boolean;
-  created_at: string;
+  is_verified: boolean;
+  owner_id: string;
+  owner?: {
+    username: string;
+    is_host: boolean;
+  };
 }
 
 interface Stats {
@@ -36,7 +40,7 @@ interface Party {
   id: string;
   title: string;
   flyer_url: string;
-  date: string;
+  date: string | null;
   location: string;
   city: string;
   ticket_price: number;
@@ -48,7 +52,7 @@ export default function HostProfileScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { user } = useAuthStore();
-  const hostId = params.id as string;
+  const hostProfileId = params.id as string; // this is host_profiles.id
 
   const [profile, setProfile] = useState<HostProfile | null>(null);
   const [stats, setStats] = useState<Stats>({
@@ -64,21 +68,34 @@ export default function HostProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"upcoming" | "past">("upcoming");
 
+  // Step 1: fetch the host_profile record
   useEffect(() => {
-    if (hostId) {
+    if (hostProfileId) {
       fetchHostProfile();
-      fetchHostStats();
-      fetchHostParties();
-      checkIfFollowing();
     }
-  }, [hostId]);
+  }, [hostProfileId]);
+
+  // Step 2: once we have owner_id, fetch stats/parties/follow status
+  useEffect(() => {
+    if (profile?.owner_id) {
+      fetchHostStats(profile.owner_id);
+      fetchHostParties(profile.owner_id);
+      checkIfFollowing(profile.owner_id);
+    }
+  }, [profile?.owner_id]);
 
   const fetchHostProfile = async () => {
     try {
       const { data, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", hostId)
+        .from("host_profiles")
+        .select(`
+          *,
+          owner:profiles!owner_id (
+            username,
+            is_host
+          )
+        `)
+        .eq("id", hostProfileId)
         .single();
 
       if (error) throw error;
@@ -90,45 +107,44 @@ export default function HostProfileScreen() {
     }
   };
 
-  const fetchHostStats = async () => {
+  const fetchHostStats = async (ownerId: string) => {
     try {
-      // Parties hosted
+      // Parties hosted via host_profile_id
       const { count: hosted } = await supabase
         .from("parties")
         .select("*", { count: "exact", head: true })
-        .eq("host_id", hostId);
+        .eq("host_profile_id", hostProfileId);
 
       // Total tickets sold
-      const { data: parties } = await supabase
+      const { data: partiesData } = await supabase
         .from("parties")
         .select("tickets_sold")
-        .eq("host_id", hostId);
+        .eq("host_profile_id", hostProfileId);
 
       const totalSold =
-        parties?.reduce((sum, p) => sum + (p.tickets_sold || 0), 0) || 0;
+        partiesData?.reduce((sum, p) => sum + (p.tickets_sold || 0), 0) || 0;
 
-      // Reviews
+      // Reviews (host_id is the owner's user id)
       const { data: reviews } = await supabase
         .from("reviews")
         .select("rating")
-        .eq("host_id", hostId);
+        .eq("host_id", ownerId);
 
       const avgRating =
         reviews && reviews.length
           ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
           : 0;
 
-      // Followers
+      // Followers/following are on the owner's user profile
       const { count: followers } = await supabase
         .from("follows")
         .select("*", { count: "exact", head: true })
-        .eq("following_id", hostId);
+        .eq("following_id", ownerId);
 
-      // Following
       const { count: following } = await supabase
         .from("follows")
         .select("*", { count: "exact", head: true })
-        .eq("follower_id", hostId);
+        .eq("follower_id", ownerId);
 
       setStats({
         partiesHosted: hosted || 0,
@@ -143,51 +159,47 @@ export default function HostProfileScreen() {
     }
   };
 
-  const fetchHostParties = async () => {
+  const fetchHostParties = async (ownerId: string) => {
     try {
-      const now = new Date().toISOString();
-
       const { data, error } = await supabase
         .from("parties")
         .select("*")
-        .eq("host_id", hostId)
+        .eq("host_profile_id", hostProfileId)
         .eq("is_published", true)
         .order("date", { ascending: true });
 
       if (error) throw error;
-
       setParties(data || []);
     } catch (error) {
       console.error("Error fetching host parties:", error);
     }
   };
 
-  const checkIfFollowing = async () => {
+  const checkIfFollowing = async (ownerId: string) => {
     if (!user) return;
-
     try {
       const { data } = await supabase
         .from("follows")
         .select("id")
         .eq("follower_id", user.id)
-        .eq("following_id", hostId)
+        .eq("following_id", ownerId)
         .single();
 
       setIsFollowing(!!data);
-    } catch (error) {
+    } catch {
       setIsFollowing(false);
     }
   };
 
   const handleFollow = async () => {
-    if (!user) return;
+    if (!user || !profile?.owner_id) return;
 
     const wasFollowing = isFollowing;
     setIsFollowing(!wasFollowing);
-    setStats({
-      ...stats,
-      followers: wasFollowing ? stats.followers - 1 : stats.followers + 1,
-    });
+    setStats((prev) => ({
+      ...prev,
+      followers: wasFollowing ? prev.followers - 1 : prev.followers + 1,
+    }));
 
     try {
       if (wasFollowing) {
@@ -195,20 +207,20 @@ export default function HostProfileScreen() {
           .from("follows")
           .delete()
           .eq("follower_id", user.id)
-          .eq("following_id", hostId);
+          .eq("following_id", profile.owner_id);
       } else {
         await supabase.from("follows").insert({
           follower_id: user.id,
-          following_id: hostId,
+          following_id: profile.owner_id,
         });
       }
     } catch (error) {
       console.error("Error toggling follow:", error);
       setIsFollowing(wasFollowing);
-      setStats({
-        ...stats,
-        followers: wasFollowing ? stats.followers + 1 : stats.followers - 1,
-      });
+      setStats((prev) => ({
+        ...prev,
+        followers: wasFollowing ? prev.followers + 1 : prev.followers - 1,
+      }));
     }
   };
 
@@ -220,8 +232,14 @@ export default function HostProfileScreen() {
     });
   };
 
-  const upcomingParties = parties.filter((p) => new Date(p.date) >= new Date());
-  const pastParties = parties.filter((p) => new Date(p.date) < new Date());
+  const upcomingParties = parties.filter((p) => {
+  if (!p.date) return true; // date is null/TBA → treat as upcoming
+  return new Date(p.date) >= new Date();
+});
+const pastParties = parties.filter((p) => {
+  if (!p.date) return false; // date is null/TBA → exclude from past
+  return new Date(p.date) < new Date();
+});
 
   const renderPartyCard = ({ item }: { item: Party }) => (
     <TouchableOpacity
@@ -231,7 +249,9 @@ export default function HostProfileScreen() {
         router.push({ pathname: "/party/[id]", params: { id: item.id } })
       }
     >
-      {(item.flyer_url && (item.flyer_url.startsWith('http') || item.flyer_url.startsWith('https'))) ? (
+      {item.flyer_url &&
+      (item.flyer_url.startsWith("http") ||
+        item.flyer_url.startsWith("https")) ? (
         <ExpoImage
           source={{ uri: item.flyer_url }}
           className="w-full rounded-2xl mb-2"
@@ -240,7 +260,7 @@ export default function HostProfileScreen() {
           transition={200}
         />
       ) : (
-        <View 
+        <View
           className="w-full rounded-2xl mb-2 bg-gray-800 items-center justify-center"
           style={{ aspectRatio: 4 / 5 }}
         >
@@ -250,9 +270,7 @@ export default function HostProfileScreen() {
       <Text className="text-white font-bold text-sm mb-1" numberOfLines={1}>
         {item.title}
       </Text>
-      <Text className="text-gray-400 text-xs mb-1">
-        {formatDate(item.date)}
-      </Text>
+      <Text className="text-gray-400 text-xs mb-1">{item.date ? formatDate(item.date) : "TBA"}</Text>
       <Text className="text-purple-400 font-semibold text-sm">
         ₦{item.ticket_price.toLocaleString()}
       </Text>
@@ -275,12 +293,14 @@ export default function HostProfileScreen() {
     );
   }
 
+  // Is the current logged-in user the owner of this host profile?
+  const isOwner = user?.id === profile.owner_id;
+
   return (
     <ScrollView
       className="flex-1 bg-[#191022]"
       showsVerticalScrollIndicator={false}
     >
-      {/* Header */}
       <View className="pt-12 px-6">
         <TouchableOpacity
           onPress={() => router.back()}
@@ -292,28 +312,29 @@ export default function HostProfileScreen() {
         {/* Profile Info */}
         <View className="items-center mb-6">
           {profile.avatar_url ? (
-            <ExpoImage
-              source={{ uri: profile.avatar_url }}
-              className="w-24 h-24 rounded-full mb-4"
-              contentFit="cover"
-              transition={200}
-            />
+            <Image
+  source={{ uri: profile.avatar_url }}
+  style={{ width: 96, height: 96, borderRadius: 48, marginBottom: 16 }}
+  resizeMode="cover"
+/>
           ) : (
             <View className="w-24 h-24 rounded-full bg-purple-600 items-center justify-center mb-4">
               <Text className="text-white text-3xl font-bold">
-                {profile.username.charAt(0).toUpperCase()}
+                {profile.name.charAt(0).toUpperCase()}
               </Text>
             </View>
           )}
 
           <View className="items-center mb-3">
-            <Text className="text-white text-2xl font-bold">
-              {profile.full_name || profile.username}
-            </Text>
-            <Text className="text-gray-400 text-base">@{profile.username}</Text>
+            <Text className="text-white text-2xl font-bold">{profile.name}</Text>
+            {profile.owner?.username && (
+              <Text className="text-gray-400 text-base">
+                @{profile.owner.username}
+              </Text>
+            )}
           </View>
 
-          {profile.is_host && (
+          {profile.is_verified && (
             <View className="bg-purple-600/20 px-4 py-2 rounded-full mb-3">
               <Text className="text-purple-400 font-bold">VERIFIED HOST</Text>
             </View>
@@ -326,7 +347,7 @@ export default function HostProfileScreen() {
           )}
 
           {/* Action Buttons */}
-          {user?.id !== hostId ? (
+          {!isOwner ? (
             <TouchableOpacity
               onPress={handleFollow}
               className={`px-8 py-3 rounded-full ${
@@ -345,128 +366,104 @@ export default function HostProfileScreen() {
               className="px-8 py-3 rounded-full bg-purple-600 flex-row items-center"
             >
               <Ionicons name="wallet-outline" size={20} color="#fff" />
-              <Text className="text-white font-bold ml-2">Earnings Dashboard</Text>
+              <Text className="text-white font-bold ml-2">
+                Earnings Dashboard
+              </Text>
             </TouchableOpacity>
           )}
         </View>
 
-        {/* Stats */}
-        {profile.is_host ? (
-          <>
-            {/* Host Stats */}
-            <View className="flex-row bg-white/5 rounded-2xl p-4 mb-4">
-              <View className="flex-1 items-center border-r border-white/10">
-                <Text className="text-white text-2xl font-bold">
-                  {stats.partiesHosted}
-                </Text>
-                <Text className="text-gray-400 text-xs mt-1">Hosted</Text>
-              </View>
-              <View className="flex-1 items-center border-r border-white/10">
-                <Text className="text-white text-2xl font-bold">
-                  {stats.totalTicketsSold}
-                </Text>
-                <Text className="text-gray-400 text-xs mt-1">Tickets Sold</Text>
-              </View>
-              <View className="flex-1 items-center">
-                <View className="flex-row items-center gap-1">
-                  <Text className="text-white text-2xl font-bold">
-                    {stats.averageRating.toFixed(1)}
-                  </Text>
-                  <Ionicons name="star" size={16} color="#8B5CF6" />
-                </View>
-                <Text className="text-gray-400 text-xs mt-1">
-                  {stats.totalReviews} Reviews
-                </Text>
-              </View>
-            </View>
-
-            {/* Secondary Stats */}
-            <View className="flex-row bg-white/5 rounded-2xl p-4 mb-6">
-              <View className="flex-1 items-center border-r border-white/10">
-                <Text className="text-white text-xl font-bold">
-                  {stats.followers}
-                </Text>
-                <Text className="text-gray-400 text-xs mt-1">Followers</Text>
-              </View>
-              <View className="flex-1 items-center">
-                <Text className="text-white text-xl font-bold">
-                  {stats.following}
-                </Text>
-                <Text className="text-gray-400 text-xs mt-1">Following</Text>
-              </View>
-            </View>
-          </>
-        ) : (
-          /* Normal User Stats */
-          <View className="flex-row bg-white/5 rounded-2xl p-4 mb-6">
-            <View className="flex-1 items-center border-r border-white/10">
-              <Text className="text-white text-xl font-bold">
-                {stats.followers}
-              </Text>
-              <Text className="text-gray-400 text-xs mt-1">Followers</Text>
-            </View>
-            <View className="flex-1 items-center">
-              <Text className="text-white text-xl font-bold">
-                {stats.following}
-              </Text>
-              <Text className="text-gray-400 text-xs mt-1">Following</Text>
-            </View>
+        {/* Host Stats */}
+        <View className="flex-row bg-white/5 rounded-2xl p-4 mb-4">
+          <View className="flex-1 items-center border-r border-white/10">
+            <Text className="text-white text-2xl font-bold">
+              {stats.partiesHosted}
+            </Text>
+            <Text className="text-gray-400 text-xs mt-1">Hosted</Text>
           </View>
-        )}
+          <View className="flex-1 items-center border-r border-white/10">
+            <Text className="text-white text-2xl font-bold">
+              {stats.totalTicketsSold}
+            </Text>
+            <Text className="text-gray-400 text-xs mt-1">Tickets Sold</Text>
+          </View>
+          <View className="flex-1 items-center">
+            <View className="flex-row items-center gap-1">
+              <Text className="text-white text-2xl font-bold">
+                {stats.averageRating.toFixed(1)}
+              </Text>
+              <Ionicons name="star" size={16} color="#8B5CF6" />
+            </View>
+            <Text className="text-gray-400 text-xs mt-1">
+              {stats.totalReviews} Reviews
+            </Text>
+          </View>
+        </View>
+
+        {/* Followers/Following */}
+        <View className="flex-row bg-white/5 rounded-2xl p-4 mb-6">
+          <View className="flex-1 items-center border-r border-white/10">
+            <Text className="text-white text-xl font-bold">
+              {stats.followers}
+            </Text>
+            <Text className="text-gray-400 text-xs mt-1">Followers</Text>
+          </View>
+          <View className="flex-1 items-center">
+            <Text className="text-white text-xl font-bold">
+              {stats.following}
+            </Text>
+            <Text className="text-gray-400 text-xs mt-1">Following</Text>
+          </View>
+        </View>
 
         {/* Tabs */}
-        {profile.is_host && (
-          <>
-            <View className="flex-row border-b border-white/10 mb-4">
-              <TouchableOpacity
-                onPress={() => setActiveTab("upcoming")}
-                className={`flex-1 pb-3 ${
-                  activeTab === "upcoming" ? "border-b-2 border-purple-600" : ""
-                }`}
-              >
-                <Text
-                  className={`text-center font-semibold ${
-                    activeTab === "upcoming" ? "text-white" : "text-gray-400"
-                  }`}
-                >
-                  Upcoming ({upcomingParties.length})
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setActiveTab("past")}
-                className={`flex-1 pb-3 ${
-                  activeTab === "past" ? "border-b-2 border-purple-600" : ""
-                }`}
-              >
-                <Text
-                  className={`text-center font-semibold ${
-                    activeTab === "past" ? "text-white" : "text-gray-400"
-                  }`}
-                >
-                  Past ({pastParties.length})
-                </Text>
-              </TouchableOpacity>
-            </View>
+        <View className="flex-row border-b border-white/10 mb-4">
+          <TouchableOpacity
+            onPress={() => setActiveTab("upcoming")}
+            className={`flex-1 pb-3 ${
+              activeTab === "upcoming" ? "border-b-2 border-purple-600" : ""
+            }`}
+          >
+            <Text
+              className={`text-center font-semibold ${
+                activeTab === "upcoming" ? "text-white" : "text-gray-400"
+              }`}
+            >
+              Upcoming ({upcomingParties.length})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setActiveTab("past")}
+            className={`flex-1 pb-3 ${
+              activeTab === "past" ? "border-b-2 border-purple-600" : ""
+            }`}
+          >
+            <Text
+              className={`text-center font-semibold ${
+                activeTab === "past" ? "text-white" : "text-gray-400"
+              }`}
+            >
+              Past ({pastParties.length})
+            </Text>
+          </TouchableOpacity>
+        </View>
 
-            {/* Parties Grid */}
-            <FlatList
-              data={activeTab === "upcoming" ? upcomingParties : pastParties}
-              renderItem={renderPartyCard}
-              keyExtractor={(item) => item.id}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingBottom: 20 }}
-              ListEmptyComponent={
-                <View className="flex-1 items-center justify-center py-12">
-                  <Ionicons name="calendar-outline" size={48} color="#666" />
-                  <Text className="text-gray-400 mt-3">
-                    No {activeTab} parties
-                  </Text>
-                </View>
-              }
-            />
-          </>
-        )}
+        <FlatList
+          data={activeTab === "upcoming" ? upcomingParties : pastParties}
+          renderItem={renderPartyCard}
+          keyExtractor={(item) => item.id}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 20 }}
+          ListEmptyComponent={
+            <View className="flex-1 items-center justify-center py-12">
+              <Ionicons name="calendar-outline" size={48} color="#666" />
+              <Text className="text-gray-400 mt-3">
+                No {activeTab} parties
+              </Text>
+            </View>
+          }
+        />
       </View>
     </ScrollView>
   );

@@ -1,18 +1,18 @@
 import { Ionicons } from "@expo/vector-icons";
-import * as ImagePicker from "expo-image-picker";
 import { Image as ExpoImage } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "../../stores/authStore";
@@ -57,7 +57,19 @@ export default function HostVerificationScreen() {
 
       if (profileData?.host_verified_at || profileData?.host_verification_status === "approved") {
         setStatus("approved");
-        router.replace("/(app)/createParty");
+        
+        // Check if they have a brand profile yet
+        const { data: profiles } = await supabase
+          .from("host_profiles")
+          .select("id")
+          .eq("owner_id", user.id)
+          .limit(1);
+
+        if (!profiles || profiles.length === 0) {
+          router.replace("/(app)/host-profile-setup");
+        } else {
+          router.replace("/(app)/createParty");
+        }
         return;
       }
 
