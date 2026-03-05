@@ -1,7 +1,8 @@
+import { useAudioStore } from "@/stores/audioStore";
 import { Ionicons } from "@expo/vector-icons";
 import { Image as ExpoImage } from "expo-image";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -53,6 +54,16 @@ export default function HostProfileScreen() {
   const params = useLocalSearchParams();
   const { user } = useAuthStore();
   const hostProfileId = params.id as string; // this is host_profiles.id
+  const { setFeedActive } = useAudioStore();
+
+  useFocusEffect(
+    useCallback(() => {
+      setFeedActive(false);
+      return () => {
+        setFeedActive(true);
+      };
+    }, []),
+  );
 
   const [profile, setProfile] = useState<HostProfile | null>(null);
   const [stats, setStats] = useState<Stats>({
@@ -88,13 +99,15 @@ export default function HostProfileScreen() {
     try {
       const { data, error } = await supabase
         .from("host_profiles")
-        .select(`
+        .select(
+          `
           *,
           owner:profiles!owner_id (
             username,
             is_host
           )
-        `)
+        `,
+        )
         .eq("id", hostProfileId)
         .single();
 
@@ -233,13 +246,13 @@ export default function HostProfileScreen() {
   };
 
   const upcomingParties = parties.filter((p) => {
-  if (!p.date) return true; // date is null/TBA → treat as upcoming
-  return new Date(p.date) >= new Date();
-});
-const pastParties = parties.filter((p) => {
-  if (!p.date) return false; // date is null/TBA → exclude from past
-  return new Date(p.date) < new Date();
-});
+    if (!p.date) return true; // date is null/TBA → treat as upcoming
+    return new Date(p.date) >= new Date();
+  });
+  const pastParties = parties.filter((p) => {
+    if (!p.date) return false; // date is null/TBA → exclude from past
+    return new Date(p.date) < new Date();
+  });
 
   const renderPartyCard = ({ item }: { item: Party }) => (
     <TouchableOpacity
@@ -270,7 +283,9 @@ const pastParties = parties.filter((p) => {
       <Text className="text-white font-bold text-sm mb-1" numberOfLines={1}>
         {item.title}
       </Text>
-      <Text className="text-gray-400 text-xs mb-1">{item.date ? formatDate(item.date) : "TBA"}</Text>
+      <Text className="text-gray-400 text-xs mb-1">
+        {item.date ? formatDate(item.date) : "TBA"}
+      </Text>
       <Text className="text-purple-400 font-semibold text-sm">
         ₦{item.ticket_price.toLocaleString()}
       </Text>
@@ -313,10 +328,15 @@ const pastParties = parties.filter((p) => {
         <View className="items-center mb-6">
           {profile.avatar_url ? (
             <Image
-  source={{ uri: profile.avatar_url }}
-  style={{ width: 96, height: 96, borderRadius: 48, marginBottom: 16 }}
-  resizeMode="cover"
-/>
+              source={{ uri: profile.avatar_url }}
+              style={{
+                width: 96,
+                height: 96,
+                borderRadius: 48,
+                marginBottom: 16,
+              }}
+              resizeMode="cover"
+            />
           ) : (
             <View className="w-24 h-24 rounded-full bg-purple-600 items-center justify-center mb-4">
               <Text className="text-white text-3xl font-bold">
@@ -326,7 +346,9 @@ const pastParties = parties.filter((p) => {
           )}
 
           <View className="items-center mb-3">
-            <Text className="text-white text-2xl font-bold">{profile.name}</Text>
+            <Text className="text-white text-2xl font-bold">
+              {profile.name}
+            </Text>
             {profile.owner?.username && (
               <Text className="text-gray-400 text-base">
                 @{profile.owner.username}
@@ -458,9 +480,7 @@ const pastParties = parties.filter((p) => {
           ListEmptyComponent={
             <View className="flex-1 items-center justify-center py-12">
               <Ionicons name="calendar-outline" size={48} color="#666" />
-              <Text className="text-gray-400 mt-3">
-                No {activeTab} parties
-              </Text>
+              <Text className="text-gray-400 mt-3">No {activeTab} parties</Text>
             </View>
           }
         />

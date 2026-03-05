@@ -1,16 +1,17 @@
+import { useAudioStore } from "@/stores/audioStore";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "../../stores/authStore";
@@ -31,7 +32,20 @@ export default function BankAccountScreen() {
   const [accountName, setAccountName] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [existingAccount, setExistingAccount] = useState<BankAccount | null>(null);
+  const [existingAccount, setExistingAccount] = useState<BankAccount | null>(
+    null,
+  );
+  // Inside the component:
+  const { setFeedActive } = useAudioStore();
+
+  useFocusEffect(
+    useCallback(() => {
+      setFeedActive(false);
+      return () => {
+        setFeedActive(true);
+      };
+    }, []),
+  );
 
   useEffect(() => {
     if (user) {
@@ -113,7 +127,7 @@ export default function BankAccountScreen() {
   }
 
   return (
-    <KeyboardAvoidingView 
+    <KeyboardAvoidingView
       className="flex-1 bg-[#191022]"
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
@@ -122,21 +136,33 @@ export default function BankAccountScreen() {
         <TouchableOpacity onPress={() => router.back()} className="mr-4">
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
-        <Text className="text-white text-xl font-bold flex-1">Bank Account</Text>
+        <Text className="text-white text-xl font-bold flex-1">
+          Bank Account
+        </Text>
       </View>
 
       <ScrollView className="flex-1 p-6" keyboardShouldPersistTaps="handled">
         <View className="bg-white/5 p-6 rounded-3xl border border-white/10 mb-8">
-          <Ionicons name="business-outline" size={48} color="#8B5CF6" className="mb-4" />
-          <Text className="text-white text-xl font-bold mb-2">Payout Destination</Text>
+          <Ionicons
+            name="business-outline"
+            size={48}
+            color="#8B5CF6"
+            className="mb-4"
+          />
+          <Text className="text-white text-xl font-bold mb-2">
+            Payout Destination
+          </Text>
           <Text className="text-gray-400 text-sm">
-            Enter the bank account details where you want to receive your earnings.
+            Enter the bank account details where you want to receive your
+            earnings.
           </Text>
         </View>
 
         <View className="space-y-6">
           <View>
-            <Text className="text-gray-400 text-sm font-semibold mb-2 ml-1">Bank Name</Text>
+            <Text className="text-gray-400 text-sm font-semibold mb-2 ml-1">
+              Bank Name
+            </Text>
             <TextInput
               className="bg-white/5 border border-white/10 p-4 rounded-2xl text-white text-base"
               value={bankName}
@@ -147,7 +173,9 @@ export default function BankAccountScreen() {
           </View>
 
           <View className="mt-4">
-            <Text className="text-gray-400 text-sm font-semibold mb-2 ml-1">Account Number</Text>
+            <Text className="text-gray-400 text-sm font-semibold mb-2 ml-1">
+              Account Number
+            </Text>
             <TextInput
               className="bg-white/5 border border-white/10 p-4 rounded-2xl text-white text-base"
               value={accountNumber}
@@ -160,7 +188,9 @@ export default function BankAccountScreen() {
           </View>
 
           <View className="mt-4">
-            <Text className="text-gray-400 text-sm font-semibold mb-2 ml-1">Account Name</Text>
+            <Text className="text-gray-400 text-sm font-semibold mb-2 ml-1">
+              Account Name
+            </Text>
             <TextInput
               className="bg-white/5 border border-white/10 p-4 rounded-2xl text-white text-base"
               value={accountName}
@@ -176,12 +206,20 @@ export default function BankAccountScreen() {
           onPress={handleSave}
           disabled={saving}
           className="bg-purple-600 py-4 rounded-2xl items-center mt-12 mb-10"
-          style={{ shadowColor: "#8B5CF6", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 }}
+          style={{
+            shadowColor: "#8B5CF6",
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.3,
+            shadowRadius: 8,
+            elevation: 8,
+          }}
         >
           {saving ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text className="text-white font-bold text-lg">Save Account Details</Text>
+            <Text className="text-white font-bold text-lg">
+              Save Account Details
+            </Text>
           )}
         </TouchableOpacity>
       </ScrollView>

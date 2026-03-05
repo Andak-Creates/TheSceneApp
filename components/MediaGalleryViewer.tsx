@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { useAudioStore } from "../stores/audioStore";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 interface MediaItem {
   id: string;
@@ -31,9 +31,8 @@ interface MediaGalleryViewerProps {
   aspectRatio?: number;
   showDelete?: boolean;
   onDelete?: (id: string) => void;
-
   isActive?: boolean;
-  instanceId?: string;  
+  instanceId?: string;
 }
 
 export default function MediaGalleryViewer({
@@ -43,64 +42,118 @@ export default function MediaGalleryViewer({
   aspectRatio = 4 / 5,
   showDelete = false,
   onDelete,
-  isActive = true,   // ← add this
-  instanceId,        // ← add this
+  isActive = true,
+  instanceId,
 }: MediaGalleryViewerProps) {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [fullscreen, setFullscreen] = useState(false);
+  const [fullscreenIndex, setFullscreenIndex] = useState(initialIndex);
   const [containerWidth, setContainerWidth] = useState(SCREEN_WIDTH);
   const flatListRef = useRef<FlatList>(null);
+  const fullscreenFlatListRef = useRef<FlatList>(null);
 
-   const filteredMedia = (media || []).filter(item => 
-    item.media_url && (
-      item.media_url.startsWith("http") || 
-      item.media_url.startsWith("https") || 
-      item.media_url.startsWith("file://") ||
-      item.media_url.startsWith("/")
-    )
+  const filteredMedia = (media || []).filter(
+    (item) =>
+      item.media_url &&
+      (item.media_url.startsWith("http") ||
+        item.media_url.startsWith("https") ||
+        item.media_url.startsWith("file://") ||
+        item.media_url.startsWith("/")),
   );
 
   if (filteredMedia.length === 0) return null;
 
   const handleScroll = (event: any) => {
     const contentOffset = event.nativeEvent.contentOffset.x;
-    const index = Math.round(contentOffset / containerWidth);
+    const index = Math.round(contentOffset / SCREEN_WIDTH);
     if (index !== currentIndex) {
       setCurrentIndex(index);
     }
   };
 
- const renderItem = ({ item }: { item: MediaItem }) => (
-  <TouchableOpacity
-    activeOpacity={0.9}
-    onPress={onPress || (() => {})}
-    style={{ width: containerWidth, aspectRatio }}
-  >
-    {item.media_type === "image" ? (
-      <RNImage
-        source={{ uri: item.media_url }}
-        className="w-full h-full bg-gray-900"
-        resizeMode="cover"
-      />
-    ) : (
-      <View className="flex-1">
-        <VideoPlayer
-          videoUrl={item.media_url}
-          autoPlay={true}
-          loop={true}
-          isActive={isActive}  // ← now this will correctly reference the prop
+  const handleFullscreenScroll = (event: any) => {
+    const contentOffset = event.nativeEvent.contentOffset.x;
+    const index = Math.round(contentOffset / SCREEN_WIDTH);
+    if (index !== fullscreenIndex) {
+      setFullscreenIndex(index);
+    }
+  };
+
+  const openFullscreen = (index: number) => {
+    setFullscreenIndex(index);
+    setFullscreen(true);
+  };
+
+  // Inline gallery item (feed / detail page)
+  const renderItem = ({ item, index }: { item: MediaItem; index: number }) => (
+    <TouchableOpacity
+      activeOpacity={0.9}
+      onPress={onPress || (() => {})}
+      style={{ width: containerWidth, aspectRatio }}
+    >
+      {item.media_type === "image" ? (
+        <RNImage
+          source={{ uri: item.media_url }}
+          className="w-full h-full bg-gray-900"
+          resizeMode="cover"
         />
-        <MuteToggleOverlay />
-      </View>
-    )}
-  </TouchableOpacity>
-);
+      ) : (
+        <View className="flex-1">
+          <VideoPlayer
+            videoUrl={item.media_url}
+            autoPlay={true}
+            loop={true}
+            // Only play if this gallery is active AND this slide is current AND fullscreen is closed
+            isActive={isActive && index === currentIndex && !fullscreen}
+          />
+          <MuteToggleOverlay />
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+
+  // Fullscreen gallery item
+  const renderFullscreenItem = ({
+    item,
+    index,
+  }: {
+    item: MediaItem;
+    index: number;
+  }) => (
+    <View
+      style={{
+        width: SCREEN_WIDTH,
+        height: SCREEN_HEIGHT,
+        backgroundColor: "#000",
+      }}
+    >
+      {item.media_type === "image" ? (
+        <RNImage
+          source={{ uri: item.media_url }}
+          style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT }}
+          resizeMode="contain"
+        />
+      ) : (
+        <View style={{ flex: 1 }}>
+          <VideoPlayer
+            videoUrl={item.media_url}
+            autoPlay={true}
+            loop={false}
+            showControls={true}
+            fullscreen={true}
+            // Only play the current fullscreen slide
+            isActive={fullscreen && index === fullscreenIndex}
+          />
+          <MuteToggleOverlay />
+        </View>
+      )}
+    </View>
+  );
 
   return (
     <>
       {/* Main Gallery */}
       <View className="mb-4">
-        {/* Swippable Media Display */}
         <View className="relative w-full" style={{ aspectRatio }}>
           <FlatList
             ref={flatListRef}
@@ -124,17 +177,17 @@ export default function MediaGalleryViewer({
             })}
           />
 
-          {/* Fullscreen Button */}
+          {/* Fullscreen Button — bottom right, away from header */}
           {!onPress && (
             <TouchableOpacity
-              onPress={() => setFullscreen(true)}
-              className="absolute top-4 right-4 bg-black/50 rounded-full p-2"
+              onPress={() => openFullscreen(currentIndex)}
+              className="absolute bottom-2 right-4 bg-black/50 rounded-full p-2"
             >
               <Ionicons name="expand-outline" size={20} color="#fff" />
             </TouchableOpacity>
           )}
 
-          {/* Media Counter Indicator dots */}
+          {/* Dot Indicators */}
           {filteredMedia.length > 1 && (
             <View className="absolute bottom-4 left-0 right-0 flex-row justify-center gap-1.5">
               {filteredMedia.map((_, index) => (
@@ -150,7 +203,7 @@ export default function MediaGalleryViewer({
 
           {/* Index Counter */}
           {filteredMedia.length > 1 && (
-            <View className="absolute bottom-4 right-4 bg-black/50 px-3 py-1 rounded-full">
+            <View className="absolute bottom-4 right-16 bg-black/50 px-3 py-1 rounded-full">
               <Text className="text-white text-[10px] font-bold">
                 {currentIndex + 1} / {filteredMedia.length}
               </Text>
@@ -159,17 +212,17 @@ export default function MediaGalleryViewer({
 
           {/* Delete Button */}
           {showDelete && onDelete && (
-             <TouchableOpacity
-               onPress={() => onDelete(filteredMedia[currentIndex].id)}
-               className="absolute top-4 left-4 bg-red-500/80 p-2 rounded-full"
-               style={{ zIndex: 100 }}
-             >
-               <Ionicons name="trash-outline" size={20} color="#fff" />
-             </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => onDelete(filteredMedia[currentIndex].id)}
+              className="absolute top-4 left-4 bg-red-500/80 p-2 rounded-full"
+              style={{ zIndex: 100 }}
+            >
+              <Ionicons name="trash-outline" size={20} color="#fff" />
+            </TouchableOpacity>
           )}
         </View>
 
-        {/* Thumbnail Strip (Only show on details page, not home feed) */}
+        {/* Thumbnail Strip */}
         {!onPress && filteredMedia.length > 1 && (
           <ScrollView
             horizontal
@@ -210,72 +263,69 @@ export default function MediaGalleryViewer({
         )}
       </View>
 
-      {/* Fullscreen Modal */}
+      {/* Fullscreen Modal — swipe navigation */}
       <Modal
         visible={fullscreen}
         animationType="fade"
-        transparent={true}
+        transparent={false}
         onRequestClose={() => setFullscreen(false)}
+        statusBarTranslucent
       >
-        <View className="flex-1 bg-black">
+        <View style={{ flex: 1, backgroundColor: "#000" }}>
           {/* Close Button */}
           <TouchableOpacity
             onPress={() => setFullscreen(false)}
-            className="absolute top-12 right-4 z-10 bg-white/20 rounded-full p-2"
+            className="absolute top-12 right-4 z-20 bg-white/20 rounded-full p-2"
+            style={{ zIndex: 20 }}
           >
             <Ionicons name="close" size={28} color="#fff" />
           </TouchableOpacity>
 
-          {/* Fullscreen Media */}
-          <View className="flex-1 items-center justify-center">
-            {filteredMedia[currentIndex].media_type === "image" ? (
-              <RNImage
-                source={{ uri: filteredMedia[currentIndex].media_url }}
-                style={{ width: containerWidth, height: "100%", backgroundColor: '#111' }}
-                resizeMode="contain"
-              />
-            ) : (
-              <VideoPlayer
-                videoUrl={filteredMedia[currentIndex].media_url}
-                autoPlay={true}
-                muted={false}
-                loop={false}
-                showControls={true}
-                fullscreen={true}
-              />
-            )}
-          </View>
-
-          {/* Navigation in Fullscreen */}
+          {/* Counter */}
           {filteredMedia.length > 1 && (
-            <View className="absolute bottom-8 left-0 right-0 flex-row justify-center gap-4">
-              <TouchableOpacity
-                onPress={() => setCurrentIndex(Math.max(0, currentIndex - 1))}
-                disabled={currentIndex === 0}
-                className={`bg-white/20 rounded-full p-3 ${
-                  currentIndex === 0 ? "opacity-50" : ""
-                }`}
-              >
-                <Ionicons name="chevron-back" size={24} color="#fff" />
-              </TouchableOpacity>
+            <View
+              className="absolute top-12 left-4 z-20 bg-black/50 px-3 py-1 rounded-full"
+              style={{ zIndex: 20 }}
+            >
+              <Text className="text-white text-sm font-bold">
+                {fullscreenIndex + 1} / {filteredMedia.length}
+              </Text>
+            </View>
+          )}
 
-              <View className="bg-white/20 px-4 py-3 rounded-full">
-                <Text className="text-white font-semibold">
-                  {currentIndex + 1} / {filteredMedia.length}
-                </Text>
-              </View>
+          {/* Swipeable Fullscreen Media */}
+          <FlatList
+            ref={fullscreenFlatListRef}
+            data={filteredMedia}
+            renderItem={renderFullscreenItem}
+            horizontal
+            pagingEnabled
+            snapToInterval={SCREEN_WIDTH}
+            snapToAlignment="center"
+            decelerationRate="fast"
+            showsHorizontalScrollIndicator={false}
+            onScroll={handleFullscreenScroll}
+            scrollEventThrottle={16}
+            keyExtractor={(item) => `fullscreen-${item.id}`}
+            initialScrollIndex={fullscreenIndex}
+            getItemLayout={(_, index) => ({
+              length: SCREEN_WIDTH,
+              offset: SCREEN_WIDTH * index,
+              index,
+            })}
+          />
 
-              <TouchableOpacity
-                onPress={() =>
-                    setCurrentIndex(Math.min(filteredMedia.length - 1, currentIndex + 1))
-                }
-                disabled={currentIndex === filteredMedia.length - 1}
-                className={`bg-white/20 rounded-full p-3 ${
-                  currentIndex === filteredMedia.length - 1 ? "opacity-50" : ""
-                }`}
-              >
-                <Ionicons name="chevron-forward" size={24} color="#fff" />
-              </TouchableOpacity>
+          {/* Swipe hint dots */}
+          {filteredMedia.length > 1 && (
+            <View className="absolute bottom-12 left-0 right-0 flex-row justify-center gap-1.5">
+              {filteredMedia.map((_, index) => (
+                <View
+                  key={index}
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    index === fullscreenIndex ? "bg-white" : "bg-white/40"
+                  }`}
+                />
+              ))}
             </View>
           )}
         </View>
@@ -291,7 +341,7 @@ function MuteToggleOverlay() {
     <TouchableOpacity
       activeOpacity={0.7}
       onPress={toggleMute}
-      className="absolute bottom-4 left-4 bg-black/60 w-9 h-9 rounded-full items-center justify-center border border-white/20"
+      className="absolute bottom-2 left-4 bg-black/60 w-9 h-9 rounded-full items-center justify-center border border-white/20"
       style={{ zIndex: 100 }}
     >
       <Ionicons
@@ -303,7 +353,6 @@ function MuteToggleOverlay() {
   );
 }
 
-// ✅ Separate Video Player Component using expo-video
 interface VideoPlayerProps {
   videoUrl: string;
   autoPlay?: boolean;
@@ -317,11 +366,10 @@ interface VideoPlayerProps {
 function VideoPlayer({
   videoUrl,
   autoPlay = false,
-  muted = false,
   loop = true,
   showControls = false,
   fullscreen = false,
-  isActive = true
+  isActive = true,
 }: VideoPlayerProps) {
   const { isMuted } = useAudioStore();
 
@@ -330,7 +378,6 @@ function VideoPlayer({
     player.muted = isMuted;
   });
 
-   // Pause/play based on whether this card is visible
   React.useEffect(() => {
     if (isActive && autoPlay) {
       player.play();
@@ -339,7 +386,6 @@ function VideoPlayer({
     }
   }, [isActive]);
 
-  // Effect to sync store mute state to player
   React.useEffect(() => {
     player.muted = isMuted;
   }, [isMuted, player]);
@@ -350,9 +396,6 @@ function VideoPlayer({
       style={{ width: "100%", height: "100%" }}
       contentFit={fullscreen ? "contain" : "cover"}
       nativeControls={showControls}
-      fullscreenOptions={{
-        enable: true,
-      }}
       allowsPictureInPicture={false}
     />
   );

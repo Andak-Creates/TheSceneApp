@@ -7,8 +7,8 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { decode } from "base64-arraybuffer";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -22,13 +22,13 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
-  withSpring
+  withSpring,
 } from "react-native-reanimated";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "../../stores/authStore";
@@ -109,18 +109,29 @@ export default function PartyDetailScreen() {
   const partyId = params.id as string;
   const viewRecorded = useRef(false);
   const { setActiveVideoId } = useAudioStore();
+  const { setFeedActive } = useAudioStore();
+
+  useFocusEffect(
+    useCallback(() => {
+      setFeedActive(false); // pause feed when this screen is focused
+      return () => {
+        setFeedActive(true); // resume feed when leaving
+      };
+    }, []),
+  );
 
   useEffect(() => {
-  // Kill any feed video when this screen mounts
-  setActiveVideoId(null);
-}, []);
+    // Kill any feed video when this screen mounts
+    setActiveVideoId(null);
+  }, []);
 
   const [party, setParty] = useState<Party | null>(null);
   const [loading, setLoading] = useState(true);
   const [isCommentsVisible, setIsCommentsVisible] = useState(false);
 
   // Floating button movement
-  const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
+  const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } =
+    Dimensions.get("window");
   const translateX = useSharedValue(SCREEN_WIDTH - 80); // Start near right
   const translateY = useSharedValue(SCREEN_HEIGHT - 200); // Start above tickets bar
   const context = useSharedValue({ x: 0, y: 0 });
@@ -135,7 +146,8 @@ export default function PartyDetailScreen() {
     })
     .onEnd(() => {
       // Snap to horizontal edges
-      const snapTo = translateX.value > SCREEN_WIDTH / 2 ? SCREEN_WIDTH - 80 : 20;
+      const snapTo =
+        translateX.value > SCREEN_WIDTH / 2 ? SCREEN_WIDTH - 80 : 20;
       translateX.value = withSpring(snapTo);
 
       // Constraints for vertical (stay within 100 to SCREEN_HEIGHT - 160)
@@ -257,16 +269,18 @@ export default function PartyDetailScreen() {
 
       // Sort media: primary first, then by display_order
       if (partyData.media && Array.isArray(partyData.media)) {
-          // Filter out non-http(s) urls (broken legacy local paths)
-          partyData.media = partyData.media.filter((m: any) => 
-             m.media_url && (m.media_url.startsWith("http") || m.media_url.startsWith("https"))
-          );
+        // Filter out non-http(s) urls (broken legacy local paths)
+        partyData.media = partyData.media.filter(
+          (m: any) =>
+            m.media_url &&
+            (m.media_url.startsWith("http") || m.media_url.startsWith("https")),
+        );
 
-          partyData.media.sort((a: any, b: any) => {
-              if (a.is_primary) return -1;
-              if (b.is_primary) return 1;
-              return (a.display_order || 0) - (b.display_order || 0);
-          });
+        partyData.media.sort((a: any, b: any) => {
+          if (a.is_primary) return -1;
+          if (b.is_primary) return 1;
+          return (a.display_order || 0) - (b.display_order || 0);
+        });
       }
 
       // Get engagement counts
@@ -285,8 +299,18 @@ export default function PartyDetailScreen() {
       let isBookmarked = false;
       if (user) {
         const [likeRes, bookmarkRes] = await Promise.all([
-          supabase.from("party_likes").select("id").eq("party_id", partyId).eq("user_id", user.id).single(),
-          supabase.from("party_bookmarks").select("id").eq("party_id", partyId).eq("user_id", user.id).single(),
+          supabase
+            .from("party_likes")
+            .select("id")
+            .eq("party_id", partyId)
+            .eq("user_id", user.id)
+            .single(),
+          supabase
+            .from("party_bookmarks")
+            .select("id")
+            .eq("party_id", partyId)
+            .eq("user_id", user.id)
+            .single(),
         ]);
         isLiked = !!likeRes.data;
         isBookmarked = !!bookmarkRes.data;
@@ -307,7 +331,6 @@ export default function PartyDetailScreen() {
     }
   };
 
-
   const handleUpdateParty = async () => {
     if (!party) return;
     setSaving(true);
@@ -327,7 +350,7 @@ export default function PartyDetailScreen() {
         .eq("id", partyId);
 
       if (error) throw error;
-      
+
       setParty({
         ...party,
         title: editedTitle,
@@ -367,7 +390,11 @@ export default function PartyDetailScreen() {
     setShowDatePicker(Platform.OS === "ios");
     if (selectedDate) {
       const current = editedDate ? new Date(editedDate) : new Date();
-      current.setFullYear(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
+      current.setFullYear(
+        selectedDate.getFullYear(),
+        selectedDate.getMonth(),
+        selectedDate.getDate(),
+      );
       setEditedDate(current.toISOString());
     }
   };
@@ -385,7 +412,8 @@ export default function PartyDetailScreen() {
     if (!user || !party) return;
 
     try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const permission =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
         Alert.alert("Permission Required", "Please grant photo library access");
         return;
@@ -417,9 +445,9 @@ export default function PartyDetailScreen() {
 
       if (uploadError) throw uploadError;
 
-      const { data: { publicUrl } } = supabase.storage
-        .from("party-media")
-        .getPublicUrl(filePath);
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("party-media").getPublicUrl(filePath);
 
       // Insert into database
       const { error: dbError } = await supabase.from("party_media").insert({
@@ -461,7 +489,7 @@ export default function PartyDetailScreen() {
                 .eq("party_id", partyId);
 
               if (error) throw error;
-              
+
               await fetchPartyDetails();
             } catch (error) {
               console.error("Error deleting media:", error);
@@ -469,9 +497,9 @@ export default function PartyDetailScreen() {
             } finally {
               setSaving(false);
             }
-          }
-        }
-      ]
+          },
+        },
+      ],
     );
   };
 
@@ -548,7 +576,7 @@ export default function PartyDetailScreen() {
   const handleOpenMaps = () => {
     if (!party) return;
     if (party.location_tba) return;
-    
+
     const address = encodeURIComponent(`${party.location}, ${party.city}`);
     const url = `https://www.google.com/maps/search/?api=1&query=${address}`;
     Linking.openURL(url);
@@ -600,63 +628,69 @@ export default function PartyDetailScreen() {
   const eventEndTime = party.end_date
     ? new Date(party.end_date)
     : party.date
-    ? new Date(party.date)
-    : null;
+      ? new Date(party.date)
+      : null;
   const eventEnded = eventEndTime ? now > eventEndTime : false;
 
   return (
     <View className="flex-1 bg-[#191022]">
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ paddingBottom: 60 }}
-        >
-          {/* Header with Back Button */}
-          <View className="absolute top-12 left-4 right-4 z-10 flex-row justify-between items-center">
-            <TouchableOpacity
-              onPress={() => router.back()}
-              className="w-10 h-10 rounded-full bg-black/50 items-center justify-center"
-            >
-              <Ionicons name="arrow-back" size={24} color="#fff" />
-            </TouchableOpacity>
-            
-            <View className="flex-row gap-2">
-              {user?.id === party.host_id && (
-                <View className="flex-row gap-2">
-                  {!isEditing && (
-                    <View className="flex-row gap-2">
-                      <TouchableOpacity
-                        onPress={() => router.push({
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ paddingBottom: 60 }}
+      >
+        {/* Header with Back Button */}
+        <View className="absolute top-12 left-4 right-4 z-10 flex-row justify-between items-center">
+          <TouchableOpacity
+            onPress={() => router.back()}
+            className="w-10 h-10 rounded-full bg-black/50 items-center justify-center"
+          >
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+
+          <View className="flex-row gap-2">
+            {user?.id === party.host_id && (
+              <View className="flex-row gap-2">
+                {!isEditing && (
+                  <View className="flex-row gap-2">
+                    <TouchableOpacity
+                      onPress={() =>
+                        router.push({
                           pathname: "/party/[id]/analytics",
-                          params: { id: partyId }
-                        })}
-                        className="w-10 h-10 rounded-full bg-black/50 items-center justify-center"
-                      >
-                        <Ionicons name="stats-chart-outline" size={20} color="#fff" />
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => router.push("/host/earnings")}
-                        className="w-10 h-10 rounded-full bg-black/50 items-center justify-center"
-                      >
-                        <Ionicons name="wallet-outline" size={20} color="#fff" />
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                  <TouchableOpacity
-                    onPress={isEditing ? handleUpdateParty : toggleEditing}
-                    disabled={saving}
-                    className={`px-4 h-10 rounded-full items-center justify-center flex-row ${
-                      isEditing ? "bg-green-600" : "bg-purple-600"
-                    }`}
-                  >
+                          params: { id: partyId },
+                        })
+                      }
+                      className="w-10 h-10 rounded-full bg-black/50 items-center justify-center"
+                    >
+                      <Ionicons
+                        name="stats-chart-outline"
+                        size={20}
+                        color="#fff"
+                      />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => router.push("/host/earnings")}
+                      className="w-10 h-10 rounded-full bg-black/50 items-center justify-center"
+                    >
+                      <Ionicons name="wallet-outline" size={20} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                )}
+                <TouchableOpacity
+                  onPress={isEditing ? handleUpdateParty : toggleEditing}
+                  disabled={saving}
+                  className={`px-4 h-10 rounded-full items-center justify-center flex-row ${
+                    isEditing ? "bg-green-600" : "bg-purple-600"
+                  }`}
+                >
                   {saving ? (
                     <ActivityIndicator size="small" color="#fff" />
                   ) : (
                     <View className="flex-row items-center">
-                      <Ionicons 
-                        name={isEditing ? "checkmark" : "create-outline"} 
-                        size={20} 
-                        color="#fff" 
+                      <Ionicons
+                        name={isEditing ? "checkmark" : "create-outline"}
+                        size={20}
+                        color="#fff"
                       />
                       <Text className="text-white font-bold ml-1">
                         {isEditing ? "Save" : "Edit"}
@@ -666,441 +700,484 @@ export default function PartyDetailScreen() {
                 </TouchableOpacity>
               </View>
             )}
-              
-              {isEditing && (
-                <TouchableOpacity
-                  onPress={() => setIsEditing(false)}
-                  className="w-10 h-10 rounded-full bg-black/50 items-center justify-center"
-                >
-                  <Ionicons name="close" size={24} color="#fff" />
-                </TouchableOpacity>
-              )}
-
-              {!isEditing && (
-                <TouchableOpacity
-                  onPress={handleShareLink}
-                  className="w-10 h-10 rounded-full bg-black/50 items-center justify-center"
-                >
-                  <Ionicons name="share-outline" size={24} color="#fff" />
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-
-          {/* Media Gallery */}
-          <View className="relative">
-            {party.media && party.media.length > 0 ? (
-               <MediaGalleryViewer 
-                 media={party.media} 
-                 showDelete={isEditing}
-                 onDelete={handleDeleteMedia}
-               />
-            ) : (party.flyer_url && (party.flyer_url.startsWith('http') || party.flyer_url.startsWith('https'))) ? (
-              <View style={{ aspectRatio: 4 / 5 }} className="w-full relative">
-                <RNImage
-                    source={{ uri: party.flyer_url }}
-                    className="w-full h-full"
-                    resizeMode="cover"
-                />
-                <LinearGradient
-                  colors={["transparent", "rgba(25,16,34,0.8)", "rgba(25,16,34,1)"]}
-                  className="absolute inset-0"
-                />
-              </View>
-            ) : (
-              <View 
-                style={{ aspectRatio: 4 / 5 }} 
-                className="w-full bg-gray-800 items-center justify-center"
-              >
-                <Ionicons name="image-outline" size={64} color="#444" />
-              </View>
-            )}
 
             {isEditing && (
               <TouchableOpacity
-                onPress={handleAddMedia}
-                className="absolute bottom-10 right-6 bg-purple-600 w-12 h-12 rounded-full items-center justify-center shadow-lg border border-purple-500/30"
+                onPress={() => setIsEditing(false)}
+                className="w-10 h-10 rounded-full bg-black/50 items-center justify-center"
               >
-                <Ionicons name="add" size={32} color="#fff" />
+                <Ionicons name="close" size={24} color="#fff" />
+              </TouchableOpacity>
+            )}
+
+            {!isEditing && (
+              <TouchableOpacity
+                onPress={handleShareLink}
+                className="w-10 h-10 rounded-full bg-black/50 items-center justify-center"
+              >
+                <Ionicons name="share-outline" size={24} color="#fff" />
               </TouchableOpacity>
             )}
           </View>
-
-          {/* Party Title & Description */}
-          <View className="px-6 py-4">
-               {isEditing ? (
-                 <TextInput
-                   className="text-white text-3xl font-bold bg-white/5 p-2 rounded-lg mb-2"
-                   value={editedTitle}
-                   onChangeText={setEditedTitle}
-                   placeholder="Party Title"
-                   placeholderTextColor="#666"
-                 />
-               ) : (
-                 <Text className="text-white text-3xl font-bold">
-                   {party.title}
-                 </Text>
-               )}
-               
-               <Text className="text-purple-400 font-semibold mb-2">
-                 Hosted by {party.host_profile?.name || "Unknown Brand"}
-               </Text>
-
-              {isEditing ? (
-                <TextInput
-                  className="text-gray-300 text-base bg-white/5 p-2 rounded-lg mb-4"
-                  value={editedDescription}
-                  onChangeText={setEditedDescription}
-                  placeholder="Party Description"
-                  placeholderTextColor="#666"
-                  multiline
-                />
-              ) : (
-                party.description && (
-                  <Text className="text-gray-300 text-base mb-4">
-                    {party.description}
-                  </Text>
-                )
-              )}
-          </View>
-          
-          {/* Party Info */}
-          <View className="px-6 pb-6">
-            {/* Date & Time */}
-            <View className=" mb-4 flex flex-row items-center">
-              <View className="bg-white/5 rounded-2xl p-4">
-                <Ionicons name="calendar" size={20} color="#8B5CF6" />
-              </View>
-              <View className="ml-3 flex-1">
-                {isEditing ? (
-                  <View>
-                    <TBAToggle
-                      label="Date & Time TBA"
-                      value={editedDateTba}
-                      onChange={setEditedDateTba}
-                    />
-                    {!editedDateTba && (
-                      <View className="flex-row gap-2 mt-2">
-                        <TouchableOpacity
-                          onPress={() => setShowDatePicker(true)}
-                          className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 flex-row items-center justify-between"
-                        >
-                          <Text className="text-white font-medium">
-                            {editedDate ? new Date(editedDate).toLocaleDateString() : "Select Date"}
-                          </Text>
-                          <Ionicons name="calendar-outline" size={18} color="#8B5CF6" />
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          onPress={() => setShowTimePicker(true)}
-                          className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 flex-row items-center justify-between"
-                        >
-                          <Text className="text-white font-medium">
-                            {editedDate ? new Date(editedDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Select Time"}
-                          </Text>
-                          <Ionicons name="time-outline" size={18} color="#8B5CF6" />
-                        </TouchableOpacity>
-                      </View>
-                    )}
-
-                    {showDatePicker && (
-                      <Modal
-                        transparent
-                        animationType="fade"
-                        visible={showDatePicker}
-                      >
-                        <View className="flex-1 justify-center bg-black/80 px-4">
-                          <View className="bg-[#191022] rounded-3xl overflow-hidden">
-                            <View className="flex-row justify-between items-center p-4 border-b border-white/10 bg-[#251833]">
-                              <TouchableOpacity onPress={() => setShowDatePicker(false)}>
-                                <Text className="text-gray-400 font-semibold">Cancel</Text>
-                              </TouchableOpacity>
-                              <Text className="text-white font-bold">Select Date</Text>
-                              <TouchableOpacity onPress={() => setShowDatePicker(false)}>
-                                <Text className="text-purple-500 font-bold">Done</Text>
-                              </TouchableOpacity>
-                            </View>
-                            <View className="p-4 bg-[#191022]">
-                              <DateTimePicker
-                                value={editedDate ? new Date(editedDate) : new Date()}
-                                mode="date"
-                                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                                textColor="white"
-                                onChange={onDateChange}
-                              />
-                            </View>
-                          </View>
-                        </View>
-                      </Modal>
-                    )}
-
-                    {showTimePicker && (
-                      <Modal
-                        transparent
-                        animationType="fade"
-                        visible={showTimePicker}
-                      >
-                        <View className="flex-1 justify-center bg-black/80 px-4">
-                          <View className="bg-[#191022] rounded-3xl overflow-hidden">
-                            <View className="flex-row justify-between items-center p-4 border-b border-white/10 bg-[#251833]">
-                              <TouchableOpacity onPress={() => setShowTimePicker(false)}>
-                                <Text className="text-gray-400 font-semibold">Cancel</Text>
-                              </TouchableOpacity>
-                              <Text className="text-white font-bold">Select Time</Text>
-                              <TouchableOpacity onPress={() => setShowTimePicker(false)}>
-                                <Text className="text-purple-500 font-bold">Done</Text>
-                              </TouchableOpacity>
-                            </View>
-                            <View className="p-4 bg-[#191022]">
-                              <DateTimePicker
-                                value={editedDate ? new Date(editedDate) : new Date()}
-                                mode="time"
-                                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                                textColor="white"
-                                onChange={onTimeChange}
-                              />
-                            </View>
-                          </View>
-                        </View>
-                      </Modal>
-                    )}
-                  </View>
-                ) : (
-                  <View>
-                    <Text className="text-white font-semibold text-base">
-                      {party.date_tba ? "Date TBA" : formatDate(party.date)}
-                    </Text>
-                    {!party.date_tba && (
-                        <Text className="text-gray-400 text-sm">
-                            {formatTime(party.date)}
-                        </Text>
-                    )}
-                  </View>
-                )}
-              </View>
-            </View>
-
-            {/* Location */}
-            <TouchableOpacity
-              className=" mb-8 flex-row items-center"
-              onPress={handleOpenMaps}
-              disabled={!!party.location_tba || isEditing}
-            >
-              <View className="bg-white/5 rounded-2xl p-4">
-                <Ionicons name="location" size={20} color="#8B5CF6" />
-              </View>
-
-              <View className="ml-3 flex-1">
-                {isEditing ? (
-                  <View>
-                    <TBAToggle
-                      label="Location TBA"
-                      value={editedLocationTba}
-                      onChange={setEditedLocationTba}
-                    />
-                    {!editedLocationTba && (
-                      <View className="gap-2 mt-2">
-                        <TextInput
-                          className="text-white font-semibold text-base bg-white/5 p-3 rounded-xl border border-white/10"
-                          value={editedLocation}
-                          onChangeText={setEditedLocation}
-                          placeholder="Venue Name"
-                          placeholderTextColor="#666"
-                        />
-                        <TextInput
-                          className="text-gray-400 text-sm bg-white/5 p-2 rounded-lg"
-                          value={editedCity}
-                          onChangeText={setEditedCity}
-                          placeholder="City"
-                          placeholderTextColor="#666"
-                        />
-                      </View>
-                    )}
-                  </View>
-                ) : (
-                  <View>
-                    <Text className="text-white font-semibold text-base">
-                      {party.location_tba ? "Location TBA" : party.location}
-                    </Text>
-                    <Text className="text-gray-400 text-sm">
-                        {party.location_tba ? "Venue to be announced" : party.city}
-                    </Text>
-                  </View>
-                )}
-              </View>
-              {!party.location_tba && !isEditing && (
-                  <Ionicons name="chevron-forward" size={20} color="#666" />
-              )}
-            </TouchableOpacity>
-
-
-            {/* Music & Vibes */}
-            <View className="mb-6">
-              <Text className="text-white font-bold text-base mb-2">
-                Music & Vibe
-              </Text>
-              <View className="flex-row flex-wrap gap-2">
-                {party.music_genres.map((genre) => (
-                  <View
-                    key={genre}
-                    className="bg-purple-600/20 px-3 py-2 rounded-full"
-                  >
-                    <Text className="text-purple-300 text-sm">{genre}</Text>
-                  </View>
-                ))}
-                {party.vibes.map((vibe) => (
-                  <View
-                    key={vibe}
-                    className="bg-white/10 px-3 py-2 rounded-full"
-                  >
-                    <Text className="text-gray-300 text-sm">{vibe}</Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-            
-            {/* Additional Info Grid */}
-            <View className="flex-row flex-wrap gap-3 mb-6">
-                 {/* Dress Code */}
-                 {isEditing ? (
-                    <View className="w-full bg-white/5 p-3 rounded-xl border border-white/10">
-                        <Text className="text-gray-400 text-xs mb-1">Dress Code</Text>
-                        <TextInput
-                          className="text-white font-semibold bg-white/5 p-1 rounded"
-                          value={editedDressCode}
-                          onChangeText={setEditedDressCode}
-                          placeholder="e.g., Smart Casual"
-                          placeholderTextColor="#666"
-                        />
-                    </View>
-                 ) : party.dress_code && (
-                    <View className="w-full bg-white/5 p-3 rounded-xl border border-white/10">
-                        <Text className="text-gray-400 text-xs mb-1">Dress Code</Text>
-                        <Text className="text-white font-semibold">{party.dress_code}</Text>
-                    </View>
-                )}
-            </View>
-
-            {/* ✅ UPDATED TICKET INFO - NOW USES TIERS */}
-            {/* If Price is TBA, we can hide exact price or show TBA */}
-            <View className="bg-purple-600/10 border border-purple-600/30 rounded-2xl p-4 mb-4">
-              <View className="flex-row justify-between items-center mb-2">
-                <Text className="text-white font-bold text-lg">Tickets</Text>
-                <Text className="text-purple-400 font-bold text-xl">
-                  {party.ticket_price_tba 
-                    ? "Price TBA" 
-                    : `${ticketTiers.length > 1 ? "From " : ""}₦${displayPrice?.toLocaleString() ?? "0"}`
-                  }
-                </Text>
-              </View>
-              {!party.ticket_price_tba && (
-                <Text className="text-gray-400 text-sm">
-                  {ticketsRemaining} of {totalTickets} available
-                </Text>
-              )}
-
-              {/* ✅ SHOW TIER BREAKDOWN IF MULTIPLE TIERS AND NOT TBA */}
-              {!party.ticket_price_tba && ticketTiers.length > 1 && (
-                <View className="mt-3 pt-3 border-t border-white/10">
-                  {ticketTiers.map((tier) => (
-                    <View
-                      key={tier.id}
-                      className="flex-row justify-between items-center py-1"
-                    >
-                      <Text className="text-gray-400 text-xs">{tier.name}</Text>
-                      <Text className="text-gray-400 text-xs">
-                        {tier.quantity - tier.quantity_sold}/{tier.quantity}{" "}
-                        left
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              )}
-            </View>
-
-            {/* Engagement Stats */}
-            <View className="flex-row items-center mb-6">
-              <TouchableOpacity
-                className="flex-row items-center mr-6"
-                onPress={handleLike}
-              >
-                <Ionicons
-                  name={party.is_liked ? "heart" : "heart-outline"}
-                  size={28}
-                  color={party.is_liked ? "#ef4444" : "#fff"}
-                />
-                <Text className="text-white ml-2 font-semibold text-base">
-                  {party.likes_count}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                className="flex-row items-center"
-                onPress={handleBookmark}
-              >
-                <Ionicons
-                  name={party.is_bookmarked ? "bookmark" : "bookmark-outline"}
-                  size={26}
-                  color={party.is_bookmarked ? "#a855f7" : "#fff"}
-                />
-              </TouchableOpacity>
-            </View>
-          </View>
-        </ScrollView>
-
-        {/* Floating Comment Button (Draggable) */}
-        <GestureDetector gesture={gesture}>
-          <Animated.View 
-            style={[
-              { position: 'absolute', zIndex: 50 },
-              animatedStyle
-            ]}
-          >
-            <TouchableOpacity 
-              onPress={() => setIsCommentsVisible(true)}
-              activeOpacity={0.8}
-              className="w-14 h-14 bg-purple-600 rounded-full items-center justify-center shadow-lg border border-purple-500/30"
-            >
-              <Ionicons name="chatbubble-outline" size={26} color="#fff" />
-              {party?.comments_count! > 0 && (
-                <View className="absolute -top-1 -right-1 bg-red-500 rounded-full px-1.5 py-0.5 border-2 border-[#191022]">
-                  <Text className="text-white text-[10px] font-bold">{party?.comments_count}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          </Animated.View>
-        </GestureDetector>
-
-        {/* Fixed Bottom Tickets Button */}
-        <View className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-[#191022] to-transparent">
-            <TouchableOpacity
-              disabled={eventEnded}
-              onPress={() =>
-                !eventEnded &&
-                router.push({
-                  pathname: "/party/[id]/tickets",
-                  params: { id: partyId },
-                })
-              }
-              className={`w-full py-4 rounded-xl items-center ${
-                eventEnded ? "bg-gray-700" : "bg-purple-600"
-              }`}
-            >
-              <Text className="text-white font-bold text-lg">
-                {eventEnded
-                  ? "This event has ended"
-                  : party.ticket_price_tba
-                      ? "Get Tickets • TBA"
-                      : `Get Tickets • ${ticketTiers.length > 1 ? "From " : ""}₦${displayPrice?.toLocaleString() ?? "0"}`
-                }
-              </Text>
-            </TouchableOpacity>
         </View>
 
-        <CommentsBottomSheet
-          partyId={partyId}
-          isVisible={isCommentsVisible}
-          onClose={() => setIsCommentsVisible(false)}
-        />
+        {/* Media Gallery */}
+        <View className="relative">
+          {party.media && party.media.length > 0 ? (
+            <MediaGalleryViewer
+              media={party.media}
+              showDelete={isEditing}
+              onDelete={handleDeleteMedia}
+            />
+          ) : party.flyer_url &&
+            (party.flyer_url.startsWith("http") ||
+              party.flyer_url.startsWith("https")) ? (
+            <View style={{ aspectRatio: 4 / 5 }} className="w-full relative">
+              <RNImage
+                source={{ uri: party.flyer_url }}
+                className="w-full h-full"
+                resizeMode="cover"
+              />
+              <LinearGradient
+                colors={[
+                  "transparent",
+                  "rgba(25,16,34,0.8)",
+                  "rgba(25,16,34,1)",
+                ]}
+                className="absolute inset-0"
+              />
+            </View>
+          ) : (
+            <View
+              style={{ aspectRatio: 4 / 5 }}
+              className="w-full bg-gray-800 items-center justify-center"
+            >
+              <Ionicons name="image-outline" size={64} color="#444" />
+            </View>
+          )}
+
+          {isEditing && (
+            <TouchableOpacity
+              onPress={handleAddMedia}
+              className="absolute bottom-10 right-6 bg-purple-600 w-12 h-12 rounded-full items-center justify-center shadow-lg border border-purple-500/30"
+            >
+              <Ionicons name="add" size={32} color="#fff" />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Party Title & Description */}
+        <View className="px-6 py-4">
+          {isEditing ? (
+            <TextInput
+              className="text-white text-3xl font-bold bg-white/5 p-2 rounded-lg mb-2"
+              value={editedTitle}
+              onChangeText={setEditedTitle}
+              placeholder="Party Title"
+              placeholderTextColor="#666"
+            />
+          ) : (
+            <Text className="text-white text-3xl font-bold">{party.title}</Text>
+          )}
+
+          <Text className="text-purple-400 font-semibold mb-2">
+            Hosted by {party.host_profile?.name || "Unknown Brand"}
+          </Text>
+
+          {isEditing ? (
+            <TextInput
+              className="text-gray-300 text-base bg-white/5 p-2 rounded-lg mb-4"
+              value={editedDescription}
+              onChangeText={setEditedDescription}
+              placeholder="Party Description"
+              placeholderTextColor="#666"
+              multiline
+            />
+          ) : (
+            party.description && (
+              <Text className="text-gray-300 text-base mb-4">
+                {party.description}
+              </Text>
+            )
+          )}
+        </View>
+
+        {/* Party Info */}
+        <View className="px-6 pb-6">
+          {/* Date & Time */}
+          <View className=" mb-4 flex flex-row items-center">
+            <View className="bg-white/5 rounded-2xl p-4">
+              <Ionicons name="calendar" size={20} color="#8B5CF6" />
+            </View>
+            <View className="ml-3 flex-1">
+              {isEditing ? (
+                <View>
+                  <TBAToggle
+                    label="Date & Time TBA"
+                    value={editedDateTba}
+                    onChange={setEditedDateTba}
+                  />
+                  {!editedDateTba && (
+                    <View className="flex-row gap-2 mt-2">
+                      <TouchableOpacity
+                        onPress={() => setShowDatePicker(true)}
+                        className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 flex-row items-center justify-between"
+                      >
+                        <Text className="text-white font-medium">
+                          {editedDate
+                            ? new Date(editedDate).toLocaleDateString()
+                            : "Select Date"}
+                        </Text>
+                        <Ionicons
+                          name="calendar-outline"
+                          size={18}
+                          color="#8B5CF6"
+                        />
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={() => setShowTimePicker(true)}
+                        className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 flex-row items-center justify-between"
+                      >
+                        <Text className="text-white font-medium">
+                          {editedDate
+                            ? new Date(editedDate).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })
+                            : "Select Time"}
+                        </Text>
+                        <Ionicons
+                          name="time-outline"
+                          size={18}
+                          color="#8B5CF6"
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  {showDatePicker && (
+                    <Modal
+                      transparent
+                      animationType="fade"
+                      visible={showDatePicker}
+                    >
+                      <View className="flex-1 justify-center bg-black/80 px-4">
+                        <View className="bg-[#191022] rounded-3xl overflow-hidden">
+                          <View className="flex-row justify-between items-center p-4 border-b border-white/10 bg-[#251833]">
+                            <TouchableOpacity
+                              onPress={() => setShowDatePicker(false)}
+                            >
+                              <Text className="text-gray-400 font-semibold">
+                                Cancel
+                              </Text>
+                            </TouchableOpacity>
+                            <Text className="text-white font-bold">
+                              Select Date
+                            </Text>
+                            <TouchableOpacity
+                              onPress={() => setShowDatePicker(false)}
+                            >
+                              <Text className="text-purple-500 font-bold">
+                                Done
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                          <View className="p-4 bg-[#191022]">
+                            <DateTimePicker
+                              value={
+                                editedDate ? new Date(editedDate) : new Date()
+                              }
+                              mode="date"
+                              display={
+                                Platform.OS === "ios" ? "spinner" : "default"
+                              }
+                              textColor="white"
+                              onChange={onDateChange}
+                            />
+                          </View>
+                        </View>
+                      </View>
+                    </Modal>
+                  )}
+
+                  {showTimePicker && (
+                    <Modal
+                      transparent
+                      animationType="fade"
+                      visible={showTimePicker}
+                    >
+                      <View className="flex-1 justify-center bg-black/80 px-4">
+                        <View className="bg-[#191022] rounded-3xl overflow-hidden">
+                          <View className="flex-row justify-between items-center p-4 border-b border-white/10 bg-[#251833]">
+                            <TouchableOpacity
+                              onPress={() => setShowTimePicker(false)}
+                            >
+                              <Text className="text-gray-400 font-semibold">
+                                Cancel
+                              </Text>
+                            </TouchableOpacity>
+                            <Text className="text-white font-bold">
+                              Select Time
+                            </Text>
+                            <TouchableOpacity
+                              onPress={() => setShowTimePicker(false)}
+                            >
+                              <Text className="text-purple-500 font-bold">
+                                Done
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                          <View className="p-4 bg-[#191022]">
+                            <DateTimePicker
+                              value={
+                                editedDate ? new Date(editedDate) : new Date()
+                              }
+                              mode="time"
+                              display={
+                                Platform.OS === "ios" ? "spinner" : "default"
+                              }
+                              textColor="white"
+                              onChange={onTimeChange}
+                            />
+                          </View>
+                        </View>
+                      </View>
+                    </Modal>
+                  )}
+                </View>
+              ) : (
+                <View>
+                  <Text className="text-white font-semibold text-base">
+                    {party.date_tba ? "Date TBA" : formatDate(party.date)}
+                  </Text>
+                  {!party.date_tba && (
+                    <Text className="text-gray-400 text-sm">
+                      {formatTime(party.date)}
+                    </Text>
+                  )}
+                </View>
+              )}
+            </View>
+          </View>
+
+          {/* Location */}
+          <TouchableOpacity
+            className=" mb-8 flex-row items-center"
+            onPress={handleOpenMaps}
+            disabled={!!party.location_tba || isEditing}
+          >
+            <View className="bg-white/5 rounded-2xl p-4">
+              <Ionicons name="location" size={20} color="#8B5CF6" />
+            </View>
+
+            <View className="ml-3 flex-1">
+              {isEditing ? (
+                <View>
+                  <TBAToggle
+                    label="Location TBA"
+                    value={editedLocationTba}
+                    onChange={setEditedLocationTba}
+                  />
+                  {!editedLocationTba && (
+                    <View className="gap-2 mt-2">
+                      <TextInput
+                        className="text-white font-semibold text-base bg-white/5 p-3 rounded-xl border border-white/10"
+                        value={editedLocation}
+                        onChangeText={setEditedLocation}
+                        placeholder="Venue Name"
+                        placeholderTextColor="#666"
+                      />
+                      <TextInput
+                        className="text-gray-400 text-sm bg-white/5 p-2 rounded-lg"
+                        value={editedCity}
+                        onChangeText={setEditedCity}
+                        placeholder="City"
+                        placeholderTextColor="#666"
+                      />
+                    </View>
+                  )}
+                </View>
+              ) : (
+                <View>
+                  <Text className="text-white font-semibold text-base">
+                    {party.location_tba ? "Location TBA" : party.location}
+                  </Text>
+                  <Text className="text-gray-400 text-sm">
+                    {party.location_tba ? "Venue to be announced" : party.city}
+                  </Text>
+                </View>
+              )}
+            </View>
+            {!party.location_tba && !isEditing && (
+              <Ionicons name="chevron-forward" size={20} color="#666" />
+            )}
+          </TouchableOpacity>
+
+          {/* Music & Vibes */}
+          <View className="mb-6">
+            <Text className="text-white font-bold text-base mb-2">
+              Music & Vibe
+            </Text>
+            <View className="flex-row flex-wrap gap-2">
+              {party.music_genres.map((genre) => (
+                <View
+                  key={genre}
+                  className="bg-purple-600/20 px-3 py-2 rounded-full"
+                >
+                  <Text className="text-purple-300 text-sm">{genre}</Text>
+                </View>
+              ))}
+              {party.vibes.map((vibe) => (
+                <View key={vibe} className="bg-white/10 px-3 py-2 rounded-full">
+                  <Text className="text-gray-300 text-sm">{vibe}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+
+          {/* Additional Info Grid */}
+          <View className="flex-row flex-wrap gap-3 mb-6">
+            {/* Dress Code */}
+            {isEditing ? (
+              <View className="w-full bg-white/5 p-3 rounded-xl border border-white/10">
+                <Text className="text-gray-400 text-xs mb-1">Dress Code</Text>
+                <TextInput
+                  className="text-white font-semibold bg-white/5 p-1 rounded"
+                  value={editedDressCode}
+                  onChangeText={setEditedDressCode}
+                  placeholder="e.g., Smart Casual"
+                  placeholderTextColor="#666"
+                />
+              </View>
+            ) : (
+              party.dress_code && (
+                <View className="w-full bg-white/5 p-3 rounded-xl border border-white/10">
+                  <Text className="text-gray-400 text-xs mb-1">Dress Code</Text>
+                  <Text className="text-white font-semibold">
+                    {party.dress_code}
+                  </Text>
+                </View>
+              )
+            )}
+          </View>
+
+          {/* ✅ UPDATED TICKET INFO - NOW USES TIERS */}
+          {/* If Price is TBA, we can hide exact price or show TBA */}
+          <View className="bg-purple-600/10 border border-purple-600/30 rounded-2xl p-4 mb-4">
+            <View className="flex-row justify-between items-center mb-2">
+              <Text className="text-white font-bold text-lg">Tickets</Text>
+              <Text className="text-purple-400 font-bold text-xl">
+                {party.ticket_price_tba
+                  ? "Price TBA"
+                  : `${ticketTiers.length > 1 ? "From " : ""}₦${displayPrice?.toLocaleString() ?? "0"}`}
+              </Text>
+            </View>
+            {!party.ticket_price_tba && (
+              <Text className="text-gray-400 text-sm">
+                {ticketsRemaining} of {totalTickets} available
+              </Text>
+            )}
+
+            {/* ✅ SHOW TIER BREAKDOWN IF MULTIPLE TIERS AND NOT TBA */}
+            {!party.ticket_price_tba && ticketTiers.length > 1 && (
+              <View className="mt-3 pt-3 border-t border-white/10">
+                {ticketTiers.map((tier) => (
+                  <View
+                    key={tier.id}
+                    className="flex-row justify-between items-center py-1"
+                  >
+                    <Text className="text-gray-400 text-xs">{tier.name}</Text>
+                    <Text className="text-gray-400 text-xs">
+                      {tier.quantity - tier.quantity_sold}/{tier.quantity} left
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+
+          {/* Engagement Stats */}
+          <View className="flex-row items-center mb-6">
+            <TouchableOpacity
+              className="flex-row items-center mr-6"
+              onPress={handleLike}
+            >
+              <Ionicons
+                name={party.is_liked ? "heart" : "heart-outline"}
+                size={28}
+                color={party.is_liked ? "#ef4444" : "#fff"}
+              />
+              <Text className="text-white ml-2 font-semibold text-base">
+                {party.likes_count}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              className="flex-row items-center"
+              onPress={handleBookmark}
+            >
+              <Ionicons
+                name={party.is_bookmarked ? "bookmark" : "bookmark-outline"}
+                size={26}
+                color={party.is_bookmarked ? "#a855f7" : "#fff"}
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </ScrollView>
+
+      {/* Floating Comment Button (Draggable) */}
+      <GestureDetector gesture={gesture}>
+        <Animated.View
+          style={[{ position: "absolute", zIndex: 50 }, animatedStyle]}
+        >
+          <TouchableOpacity
+            onPress={() => setIsCommentsVisible(true)}
+            activeOpacity={0.8}
+            className="w-14 h-14 bg-purple-600 rounded-full items-center justify-center shadow-lg border border-purple-500/30"
+          >
+            <Ionicons name="chatbubble-outline" size={26} color="#fff" />
+            {party?.comments_count! > 0 && (
+              <View className="absolute -top-1 -right-1 bg-red-500 rounded-full px-1.5 py-0.5 border-2 border-[#191022]">
+                <Text className="text-white text-[10px] font-bold">
+                  {party?.comments_count}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </Animated.View>
+      </GestureDetector>
+
+      {/* Fixed Bottom Tickets Button */}
+      <View className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-[#191022] to-transparent">
+        <TouchableOpacity
+          disabled={eventEnded}
+          onPress={() =>
+            !eventEnded &&
+            router.push({
+              pathname: "/party/[id]/tickets",
+              params: { id: partyId },
+            })
+          }
+          className={`w-full py-4 rounded-xl items-center ${
+            eventEnded ? "bg-gray-700" : "bg-purple-600"
+          }`}
+        >
+          <Text className="text-white font-bold text-lg">
+            {eventEnded
+              ? "This event has ended"
+              : party.ticket_price_tba
+                ? "Get Tickets • TBA"
+                : `Get Tickets • ${ticketTiers.length > 1 ? "From " : ""}₦${displayPrice?.toLocaleString() ?? "0"}`}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <CommentsBottomSheet
+        partyId={partyId}
+        isVisible={isCommentsVisible}
+        onClose={() => setIsCommentsVisible(false)}
+      />
     </View>
   );
 }
