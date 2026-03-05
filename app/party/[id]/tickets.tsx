@@ -1,6 +1,7 @@
+import { useAudioStore } from "@/stores/audioStore";
 import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -60,6 +61,18 @@ export default function TicketPurchaseScreen() {
   const [quantity, setQuantity] = useState(1);
   const [loading, setLoading] = useState(true);
   const [purchasing, setPurchasing] = useState(false);
+
+  // Inside the component:
+  const { setFeedActive } = useAudioStore();
+
+  useFocusEffect(
+    useCallback(() => {
+      setFeedActive(false);
+      return () => {
+        setFeedActive(true);
+      };
+    }, []),
+  );
 
   // Store pending purchase data for use in Paystack callbacks
   const pendingPurchase = useRef<{
@@ -161,32 +174,44 @@ export default function TicketPurchaseScreen() {
     const amountInSmallestUnit = totalPrice;
 
     popup.checkout({
-  email: user.email || "",
-  amount: amountInSmallestUnit,
-  currency: paystackCurrency,
-  channels: ["card", "bank_transfer", "ussd", "mobile_money", "bank"],
-  metadata: {
-    party_id: partyId,
-    party_title: party.title,
-    tier_id: selectedTier,
-    tier_name: tier.name,
-    quantity,
-    custom_fields: [
-      { display_name: "Party", variable_name: "party_title", value: party.title },
-      { display_name: "Ticket Type", variable_name: "tier_name", value: tier.name },
-      { display_name: "Quantity", variable_name: "quantity", value: String(quantity) },
-    ],
-  },
-  onSuccess: async (res: any) => {
-    const ref = res.transactionRef || res.transaction || res.trans || "";
-    await handlePaymentSuccess(ref);
-  },
-  onCancel: () => {
-    setPurchasing(false);
-    pendingPurchase.current = null;
-    Alert.alert("Cancelled", "Your ticket purchase was cancelled.");
-  },
-} as any);
+      email: user.email || "",
+      amount: amountInSmallestUnit,
+      currency: paystackCurrency,
+      channels: ["card", "bank_transfer", "ussd", "mobile_money", "bank"],
+      metadata: {
+        party_id: partyId,
+        party_title: party.title,
+        tier_id: selectedTier,
+        tier_name: tier.name,
+        quantity,
+        custom_fields: [
+          {
+            display_name: "Party",
+            variable_name: "party_title",
+            value: party.title,
+          },
+          {
+            display_name: "Ticket Type",
+            variable_name: "tier_name",
+            value: tier.name,
+          },
+          {
+            display_name: "Quantity",
+            variable_name: "quantity",
+            value: String(quantity),
+          },
+        ],
+      },
+      onSuccess: async (res: any) => {
+        const ref = res.transactionRef || res.transaction || res.trans || "";
+        await handlePaymentSuccess(ref);
+      },
+      onCancel: () => {
+        setPurchasing(false);
+        pendingPurchase.current = null;
+        Alert.alert("Cancelled", "Your ticket purchase was cancelled.");
+      },
+    } as any);
   };
 
   const handlePaymentSuccess = async (reference: string) => {
@@ -217,15 +242,17 @@ export default function TicketPurchaseScreen() {
       if (ticketError) throw ticketError;
 
       // Record earnings for the host
-      const { error: earningsError } = await supabase.from("host_earnings_logs").insert({
-        host_id: party.host_id,
-        party_id: partyId,
-        ticket_id: ticketData.id,
-        amount: purchase.totalPrice,
-        fee_amount: purchase.appFee,
-        net_amount: purchase.ticketPrice,
-        currency: party.currency_code || "NGN",
-      });
+      const { error: earningsError } = await supabase
+        .from("host_earnings_logs")
+        .insert({
+          host_id: party.host_id,
+          party_id: partyId,
+          ticket_id: ticketData.id,
+          amount: purchase.totalPrice,
+          fee_amount: purchase.appFee,
+          net_amount: purchase.ticketPrice,
+          currency: party.currency_code || "NGN",
+        });
 
       if (earningsError) {
         console.error("Error recording host earnings:", earningsError);
@@ -240,7 +267,10 @@ export default function TicketPurchaseScreen() {
         "🎉 You're in!",
         `${purchase.quantity} × ${purchase.tierName} ticket${purchase.quantity > 1 ? "s" : ""} for ${party.title}`,
         [
-          { text: "View My Tickets", onPress: () => router.push("/my-tickets") },
+          {
+            text: "View My Tickets",
+            onPress: () => router.push("/my-tickets"),
+          },
           { text: "Done", onPress: () => router.back() },
         ],
       );
@@ -248,7 +278,8 @@ export default function TicketPurchaseScreen() {
       console.error("Ticket creation error:", error);
       Alert.alert(
         "Payment Received",
-        "Your payment was successful but we had trouble creating your ticket. Please contact support with reference: " + reference,
+        "Your payment was successful but we had trouble creating your ticket. Please contact support with reference: " +
+          reference,
       );
     } finally {
       setPurchasing(false);
@@ -278,8 +309,15 @@ export default function TicketPurchaseScreen() {
 
   const getCurrencySymbol = (code: string) => {
     const symbols: Record<string, string> = {
-      NGN: "₦", USD: "$", GBP: "£", EUR: "€", GHS: "₵",
-      KES: "KSh", ZAR: "R", AUD: "A$", CAD: "CA$",
+      NGN: "₦",
+      USD: "$",
+      GBP: "£",
+      EUR: "€",
+      GHS: "₵",
+      KES: "KSh",
+      ZAR: "R",
+      AUD: "A$",
+      CAD: "CA$",
     };
     return symbols[code] || code + " ";
   };
@@ -304,7 +342,9 @@ export default function TicketPurchaseScreen() {
     return (
       <View className="flex-1 bg-[#191022] items-center justify-center px-6">
         <Ionicons name="ticket-outline" size={64} color="#666" />
-        <Text className="text-white text-xl font-bold mt-4">No Tickets Available</Text>
+        <Text className="text-white text-xl font-bold mt-4">
+          No Tickets Available
+        </Text>
         <Text className="text-gray-400 text-center mt-2">
           This party doesn't have any tickets for sale yet
         </Text>
@@ -320,13 +360,18 @@ export default function TicketPurchaseScreen() {
 
   return (
     <View className="flex-1 bg-[#191022]">
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 120 }}
+      >
         {/* Header */}
         <View className="pt-12 px-6 pb-4 flex-row items-center border-b border-white/10">
           <TouchableOpacity onPress={() => router.back()} className="mr-4">
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
-          <Text className="text-white text-xl font-bold flex-1">Get Tickets</Text>
+          <Text className="text-white text-xl font-bold flex-1">
+            Get Tickets
+          </Text>
         </View>
 
         {/* Party Summary */}
@@ -336,12 +381,18 @@ export default function TicketPurchaseScreen() {
               let imageSource = null;
               if (party.media && party.media.length > 0) {
                 const primary = party.media.find((m: any) => m.is_primary);
-                imageSource = primary ? primary.media_url : party.media[0].media_url;
+                imageSource = primary
+                  ? primary.media_url
+                  : party.media[0].media_url;
               } else {
                 imageSource = party.flyer_url;
               }
               return imageSource ? (
-                <Image source={{ uri: imageSource }} className="w-20 h-24 rounded-xl" resizeMode="cover" />
+                <Image
+                  source={{ uri: imageSource }}
+                  className="w-20 h-24 rounded-xl"
+                  resizeMode="cover"
+                />
               ) : (
                 <View className="w-20 h-24 rounded-xl bg-gray-800 items-center justify-center">
                   <Ionicons name="image-outline" size={24} color="#666" />
@@ -349,19 +400,28 @@ export default function TicketPurchaseScreen() {
               );
             })()}
             <View className="ml-4 flex-1">
-              <Text className="text-white font-bold text-lg mb-1">{party.title}</Text>
-              <Text className="text-gray-400 text-sm mb-1">by {party.host?.username}</Text>
+              <Text className="text-white font-bold text-lg mb-1">
+                {party.title}
+              </Text>
+              <Text className="text-gray-400 text-sm mb-1">
+                by {party.host?.username}
+              </Text>
               <View className="flex-row items-center mb-1">
                 <Ionicons name="calendar-outline" size={14} color="#9ca3af" />
                 <Text className="text-gray-400 text-xs ml-1">
-                  {formatDate(party.date)} {party.date ? `• ${formatTime(party.date)}` : ""}
+                  {formatDate(party.date)}{" "}
+                  {party.date ? `• ${formatTime(party.date)}` : ""}
                 </Text>
               </View>
               {party.location && (
                 <View className="flex-row items-center">
                   <Ionicons name="location-outline" size={14} color="#9ca3af" />
-                  <Text className="text-gray-400 text-xs ml-1" numberOfLines={1}>
-                    {party.location}{party.city ? `, ${party.city}` : ""}
+                  <Text
+                    className="text-gray-400 text-xs ml-1"
+                    numberOfLines={1}
+                  >
+                    {party.location}
+                    {party.city ? `, ${party.city}` : ""}
                   </Text>
                 </View>
               )}
@@ -371,12 +431,17 @@ export default function TicketPurchaseScreen() {
 
         {/* Ticket Tiers */}
         <View className="px-6 py-6">
-          <Text className="text-white font-bold text-lg mb-4">Select Ticket Type</Text>
+          <Text className="text-white font-bold text-lg mb-4">
+            Select Ticket Type
+          </Text>
 
           {ticketTiers.map((tier) => (
             <TouchableOpacity
               key={tier.id}
-              onPress={() => { setSelectedTier(tier.id); setQuantity(1); }}
+              onPress={() => {
+                setSelectedTier(tier.id);
+                setQuantity(1);
+              }}
               disabled={tier.available === 0}
               className={`border rounded-2xl p-4 mb-3 ${
                 tier.available === 0
@@ -387,12 +452,21 @@ export default function TicketPurchaseScreen() {
               }`}
             >
               <View className="flex-row justify-between items-center mb-2">
-                <Text className="text-white font-bold text-base">{tier.name}</Text>
+                <Text className="text-white font-bold text-base">
+                  {tier.name}
+                </Text>
                 <Text className="text-purple-400 font-bold text-lg">
-                  {currencySymbol}{tier.price.toLocaleString()}
+                  {currencySymbol}
+                  {tier.price.toLocaleString()}
                 </Text>
               </View>
-              <Text className={tier.available === 0 ? "text-red-400 text-sm" : "text-gray-400 text-sm"}>
+              <Text
+                className={
+                  tier.available === 0
+                    ? "text-red-400 text-sm"
+                    : "text-gray-400 text-sm"
+                }
+              >
                 {tier.available === 0
                   ? "Sold Out"
                   : `${tier.available} ticket${tier.available !== 1 ? "s" : ""} available`}
@@ -403,22 +477,40 @@ export default function TicketPurchaseScreen() {
           {/* Quantity Selector */}
           {selectedTierData && selectedTierData.available > 0 && (
             <View className="mt-6">
-              <Text className="text-white font-bold text-base mb-3">Quantity</Text>
+              <Text className="text-white font-bold text-base mb-3">
+                Quantity
+              </Text>
               <View className="flex-row items-center justify-between bg-white/5 rounded-2xl p-4">
                 <TouchableOpacity
                   onPress={() => setQuantity(Math.max(1, quantity - 1))}
                   className="w-10 h-10 rounded-full bg-white/10 items-center justify-center"
                   disabled={quantity <= 1}
                 >
-                  <Ionicons name="remove" size={20} color={quantity <= 1 ? "#666" : "#fff"} />
+                  <Ionicons
+                    name="remove"
+                    size={20}
+                    color={quantity <= 1 ? "#666" : "#fff"}
+                  />
                 </TouchableOpacity>
-                <Text className="text-white font-bold text-2xl">{quantity}</Text>
+                <Text className="text-white font-bold text-2xl">
+                  {quantity}
+                </Text>
                 <TouchableOpacity
-                  onPress={() => setQuantity(Math.min(selectedTierData.available, quantity + 1))}
+                  onPress={() =>
+                    setQuantity(
+                      Math.min(selectedTierData.available, quantity + 1),
+                    )
+                  }
                   className="w-10 h-10 rounded-full bg-white/10 items-center justify-center"
                   disabled={quantity >= selectedTierData.available}
                 >
-                  <Ionicons name="add" size={20} color={quantity >= selectedTierData.available ? "#666" : "#fff"} />
+                  <Ionicons
+                    name="add"
+                    size={20}
+                    color={
+                      quantity >= selectedTierData.available ? "#666" : "#fff"
+                    }
+                  />
                 </TouchableOpacity>
               </View>
             </View>
@@ -428,24 +520,40 @@ export default function TicketPurchaseScreen() {
         {/* Price Breakdown */}
         {selectedTierData && selectedTierData.available > 0 && (
           <View className="px-6 py-6 bg-white/5 mx-6 rounded-2xl mb-6">
-            <Text className="text-white font-bold text-base mb-4">Price Breakdown</Text>
+            <Text className="text-white font-bold text-base mb-4">
+              Price Breakdown
+            </Text>
 
             <View className="flex-row justify-between mb-2">
               <Text className="text-gray-400">
-                {quantity}× {selectedTierData.name} ({currencySymbol}{selectedTierData.price.toLocaleString()} each)
+                {quantity}× {selectedTierData.name} ({currencySymbol}
+                {selectedTierData.price.toLocaleString()} each)
               </Text>
-              <Text className="text-white font-semibold">{currencySymbol}{subtotal.toLocaleString()}</Text>
+              <Text className="text-white font-semibold">
+                {currencySymbol}
+                {subtotal.toLocaleString()}
+              </Text>
             </View>
 
             <View className="flex-row justify-between mb-3 pb-3 border-b border-white/10">
               <Text className="text-gray-400">Service Fee (5%)</Text>
-              <Text className="text-white font-semibold">{currencySymbol}{appFee.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</Text>
+              <Text className="text-white font-semibold">
+                {currencySymbol}
+                {appFee.toLocaleString(undefined, {
+                  minimumFractionDigits: 0,
+                  maximumFractionDigits: 2,
+                })}
+              </Text>
             </View>
 
             <View className="flex-row justify-between">
               <Text className="text-white font-bold text-lg">Total</Text>
               <Text className="text-purple-400 font-bold text-xl">
-                {currencySymbol}{total.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                {currencySymbol}
+                {total.toLocaleString(undefined, {
+                  minimumFractionDigits: 0,
+                  maximumFractionDigits: 2,
+                })}
               </Text>
             </View>
 
@@ -460,15 +568,28 @@ export default function TicketPurchaseScreen() {
       <View className="absolute bottom-0 left-0 right-0 px-6 py-6 border-t border-white/10 bg-[#191022]">
         <TouchableOpacity
           onPress={handlePurchase}
-          disabled={purchasing || !selectedTier || !selectedTierData || selectedTierData.available === 0}
+          disabled={
+            purchasing ||
+            !selectedTier ||
+            !selectedTierData ||
+            selectedTierData.available === 0
+          }
           className={`py-4 rounded-xl items-center ${
-            !selectedTier || !selectedTierData || selectedTierData.available === 0
+            !selectedTier ||
+            !selectedTierData ||
+            selectedTierData.available === 0
               ? "bg-gray-600"
               : "bg-purple-600"
           }`}
           style={
             selectedTier && selectedTierData && selectedTierData.available > 0
-              ? { shadowColor: "#8B5CF6", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 }
+              ? {
+                  shadowColor: "#8B5CF6",
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.3,
+                  shadowRadius: 8,
+                  elevation: 8,
+                }
               : {}
           }
         >

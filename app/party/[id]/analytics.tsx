@@ -1,14 +1,15 @@
+import { useAudioStore } from "@/stores/audioStore";
 import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Image,
-    RefreshControl,
-    ScrollView,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Image,
+  RefreshControl,
+  ScrollView,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { supabase } from "../../../lib/supabase";
 import { useAuthStore } from "../../../stores/authStore";
@@ -75,11 +76,25 @@ export default function PartyAnalyticsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
-  const [attendeeFilter, setAttendeeFilter] = useState<"all" | "checked-in" | "not-checked-in">("all");
+  const [attendeeFilter, setAttendeeFilter] = useState<
+    "all" | "checked-in" | "not-checked-in"
+  >("all");
 
   useEffect(() => {
     fetchAnalytics();
   }, [partyId]);
+
+  // Inside the component:
+  const { setFeedActive } = useAudioStore();
+
+  useFocusEffect(
+    useCallback(() => {
+      setFeedActive(false);
+      return () => {
+        setFeedActive(true);
+      };
+    }, []),
+  );
 
   const fetchAnalytics = async () => {
     if (!user) return;
@@ -113,7 +128,8 @@ export default function PartyAnalyticsScreen() {
       // Fetch all tickets for this party
       const { data: tickets, error: ticketsError } = await supabase
         .from("tickets")
-        .select(`
+        .select(
+          `
           id,
           user_id,
           quantity_purchased,
@@ -126,14 +142,15 @@ export default function PartyAnalyticsScreen() {
             full_name,
             avatar_url
           )
-        `)
+        `,
+        )
         .eq("party_id", partyId)
         .eq("payment_status", "completed");
 
       if (ticketsError) throw ticketsError;
 
       // Fetch check-in records
-      const ticketIds = tickets?.map(t => t.id) || [];
+      const ticketIds = tickets?.map((t) => t.id) || [];
       const { data: checkIns, error: checkInsError } = await supabase
         .from("ticket_check_ins")
         .select("*")
@@ -144,9 +161,13 @@ export default function PartyAnalyticsScreen() {
 
       // Calculate tier stats
       const tierStats = (tiers || []).map((tier) => {
-        const tierTickets = tickets?.filter(t => t.ticket_tier_id === tier.id) || [];
+        const tierTickets =
+          tickets?.filter((t) => t.ticket_tier_id === tier.id) || [];
         const tierCheckIns = tierTickets.reduce((sum, ticket) => {
-          return sum + (checkIns?.filter(ci => ci.ticket_id === ticket.id).length || 0);
+          return (
+            sum +
+            (checkIns?.filter((ci) => ci.ticket_id === ticket.id).length || 0)
+          );
         }, 0);
 
         return {
@@ -165,31 +186,42 @@ export default function PartyAnalyticsScreen() {
       const totalSold = tierStats.reduce((sum, t) => sum + t.sold, 0);
       const totalRevenue = tierStats.reduce((sum, t) => sum + t.revenue, 0);
       const totalCheckedIn = checkIns?.length || 0;
-      const checkInRate = totalSold > 0 ? (totalCheckedIn / totalSold) * 100 : 0;
+      const checkInRate =
+        totalSold > 0 ? (totalCheckedIn / totalSold) * 100 : 0;
 
       // Build attendees list
-      const attendees = (tickets || []).map((ticket) => {
-        const lastCheckIn = checkIns?.find(ci => ci.ticket_id === ticket.id);
-        const tier = tiers?.find(t => t.id === ticket.ticket_tier_id);
-        
-        return {
-          id: ticket.id,
-          user_id: ticket.user_id,
-          buyer_name: (ticket.profiles as any)?.full_name || (ticket.profiles as any)?.username || "Unknown",
-          buyer_avatar: (ticket.profiles as any)?.avatar_url || null,
-          quantity_purchased: ticket.quantity_purchased,
-          quantity_used: ticket.quantity_used,
-          purchased_at: ticket.purchased_at,
-          total_paid: ticket.total_paid,
-          tier_name: tier?.name || "General",
-          last_check_in: lastCheckIn?.checked_in_at || null,
-        };
-      }).sort((a, b) => {
-        // Sort by check-in status, then by purchase date
-        if (a.quantity_used > 0 && b.quantity_used === 0) return -1;
-        if (a.quantity_used === 0 && b.quantity_used > 0) return 1;
-        return new Date(b.purchased_at).getTime() - new Date(a.purchased_at).getTime();
-      });
+      const attendees = (tickets || [])
+        .map((ticket) => {
+          const lastCheckIn = checkIns?.find(
+            (ci) => ci.ticket_id === ticket.id,
+          );
+          const tier = tiers?.find((t) => t.id === ticket.ticket_tier_id);
+
+          return {
+            id: ticket.id,
+            user_id: ticket.user_id,
+            buyer_name:
+              (ticket.profiles as any)?.full_name ||
+              (ticket.profiles as any)?.username ||
+              "Unknown",
+            buyer_avatar: (ticket.profiles as any)?.avatar_url || null,
+            quantity_purchased: ticket.quantity_purchased,
+            quantity_used: ticket.quantity_used,
+            purchased_at: ticket.purchased_at,
+            total_paid: ticket.total_paid,
+            tier_name: tier?.name || "General",
+            last_check_in: lastCheckIn?.checked_in_at || null,
+          };
+        })
+        .sort((a, b) => {
+          // Sort by check-in status, then by purchase date
+          if (a.quantity_used > 0 && b.quantity_used === 0) return -1;
+          if (a.quantity_used === 0 && b.quantity_used > 0) return 1;
+          return (
+            new Date(b.purchased_at).getTime() -
+            new Date(a.purchased_at).getTime()
+          );
+        });
 
       // Build check-in timeline (hourly)
       const timeline: { [key: string]: number } = {};
@@ -205,10 +237,13 @@ export default function PartyAnalyticsScreen() {
 
       // Recent check-ins
       const recentCheckIns = (checkIns || []).slice(0, 10).map((checkIn) => {
-        const ticket = tickets?.find(t => t.id === checkIn.ticket_id);
+        const ticket = tickets?.find((t) => t.id === checkIn.ticket_id);
         return {
           id: checkIn.id,
-          buyer_name: (ticket?.profiles as any)?.full_name || (ticket?.profiles as any)?.username || "Unknown",
+          buyer_name:
+            (ticket?.profiles as any)?.full_name ||
+            (ticket?.profiles as any)?.username ||
+            "Unknown",
           buyer_avatar: (ticket?.profiles as any)?.avatar_url || null,
           checked_in_at: checkIn.checked_in_at,
           scan_number: checkIn.scan_number,
@@ -261,12 +296,12 @@ export default function PartyAnalyticsScreen() {
 
   const getFilteredAttendees = () => {
     if (!analytics) return [];
-    
+
     switch (attendeeFilter) {
       case "checked-in":
-        return analytics.attendees.filter(a => a.quantity_used > 0);
+        return analytics.attendees.filter((a) => a.quantity_used > 0);
       case "not-checked-in":
-        return analytics.attendees.filter(a => a.quantity_used === 0);
+        return analytics.attendees.filter((a) => a.quantity_used === 0);
       default:
         return analytics.attendees;
     }
@@ -298,7 +333,10 @@ export default function PartyAnalyticsScreen() {
           <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
-          <Text className="text-white text-xl font-bold flex-1 ml-4" numberOfLines={1}>
+          <Text
+            className="text-white text-xl font-bold flex-1 ml-4"
+            numberOfLines={1}
+          >
             {analytics.party.title}
           </Text>
           <View style={{ width: 24 }} />
@@ -385,11 +423,15 @@ export default function PartyAnalyticsScreen() {
             </View>
 
             {/* Key Metrics */}
-            <Text className="text-white font-bold text-lg mb-4">Key Metrics</Text>
+            <Text className="text-white font-bold text-lg mb-4">
+              Key Metrics
+            </Text>
 
             {/* Revenue Card */}
             <View className="bg-gradient-to-br from-purple-600 to-purple-800 rounded-2xl p-6 mb-4">
-              <Text className="text-purple-200 text-sm mb-1">Total Revenue</Text>
+              <Text className="text-purple-200 text-sm mb-1">
+                Total Revenue
+              </Text>
               <Text className="text-white text-4xl font-bold mb-2">
                 ₦{analytics.ticketStats.totalRevenue.toLocaleString()}
               </Text>
@@ -429,10 +471,7 @@ export default function PartyAnalyticsScreen() {
             </Text>
 
             {analytics.tierStats.map((tier) => (
-              <View
-                key={tier.id}
-                className="bg-white/5 rounded-2xl p-4 mb-3"
-              >
+              <View key={tier.id} className="bg-white/5 rounded-2xl p-4 mb-3">
                 <View className="flex-row justify-between items-center mb-3">
                   <Text className="text-white font-bold text-base">
                     {tier.name}
@@ -499,30 +538,48 @@ export default function PartyAnalyticsScreen() {
               <TouchableOpacity
                 onPress={() => setAttendeeFilter("checked-in")}
                 className={`flex-1 py-3 rounded-xl ${
-                  attendeeFilter === "checked-in" ? "bg-green-600" : "bg-white/10"
+                  attendeeFilter === "checked-in"
+                    ? "bg-green-600"
+                    : "bg-white/10"
                 }`}
               >
                 <Text
                   className={`text-center font-semibold ${
-                    attendeeFilter === "checked-in" ? "text-white" : "text-gray-400"
+                    attendeeFilter === "checked-in"
+                      ? "text-white"
+                      : "text-gray-400"
                   }`}
                 >
-                  Checked In ({analytics.attendees.filter(a => a.quantity_used > 0).length})
+                  Checked In (
+                  {
+                    analytics.attendees.filter((a) => a.quantity_used > 0)
+                      .length
+                  }
+                  )
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 onPress={() => setAttendeeFilter("not-checked-in")}
                 className={`flex-1 py-3 rounded-xl ${
-                  attendeeFilter === "not-checked-in" ? "bg-orange-600" : "bg-white/10"
+                  attendeeFilter === "not-checked-in"
+                    ? "bg-orange-600"
+                    : "bg-white/10"
                 }`}
               >
                 <Text
                   className={`text-center font-semibold ${
-                    attendeeFilter === "not-checked-in" ? "text-white" : "text-gray-400"
+                    attendeeFilter === "not-checked-in"
+                      ? "text-white"
+                      : "text-gray-400"
                   }`}
                 >
-                  Pending ({analytics.attendees.filter(a => a.quantity_used === 0).length})
+                  Pending (
+                  {
+                    analytics.attendees.filter((a) => a.quantity_used === 0)
+                      .length
+                  }
+                  )
                 </Text>
               </TouchableOpacity>
             </View>
@@ -552,7 +609,8 @@ export default function PartyAnalyticsScreen() {
                       {attendee.buyer_name}
                     </Text>
                     <Text className="text-gray-400 text-sm">
-                      {attendee.tier_name} • {attendee.quantity_purchased} ticket
+                      {attendee.tier_name} • {attendee.quantity_purchased}{" "}
+                      ticket
                       {attendee.quantity_purchased > 1 ? "s" : ""}
                     </Text>
                   </View>
@@ -583,7 +641,9 @@ export default function PartyAnalyticsScreen() {
 
                   {attendee.last_check_in && (
                     <View className="flex-1">
-                      <Text className="text-gray-500 text-xs">Last Check-in</Text>
+                      <Text className="text-gray-500 text-xs">
+                        Last Check-in
+                      </Text>
                       <Text className="text-gray-300 text-sm">
                         {formatTime(attendee.last_check_in)}
                       </Text>
@@ -628,7 +688,7 @@ export default function PartyAnalyticsScreen() {
                       <View
                         className="h-full bg-purple-600"
                         style={{
-                          width: `${(slot.count / Math.max(...analytics.checkInTimeline.map(s => s.count))) * 100}%`,
+                          width: `${(slot.count / Math.max(...analytics.checkInTimeline.map((s) => s.count))) * 100}%`,
                         }}
                       />
                     </View>

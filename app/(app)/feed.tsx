@@ -1,13 +1,16 @@
+import { useAudioStore } from "@/stores/audioStore";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  FlatList, Image, Image as RNImage,
+  FlatList,
+  Image,
+  Image as RNImage,
   RefreshControl,
   Text,
   TouchableOpacity,
-  View
+  View,
 } from "react-native";
 import MediaGalleryViewer from "../../components/MediaGalleryViewer";
 import { getCurrencySymbol } from "../../lib/currency";
@@ -68,15 +71,16 @@ export default function FeedScreen() {
   const [parties, setParties] = useState<Party[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const { isFeedActive } = useAudioStore();
 
   const [activePartyId, setActivePartyId] = useState<string | null>(null);
 
-const viewabilityConfig = { itemVisiblePercentThreshold: 60 };
-const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
-  if (viewableItems.length > 0) {
-    setActivePartyId(viewableItems[0].item.id);
-  }
-}).current;
+  const viewabilityConfig = { itemVisiblePercentThreshold: 60 };
+  const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
+    if (viewableItems.length > 0) {
+      setActivePartyId(viewableItems[0].item.id);
+    }
+  }).current;
 
   useEffect(() => {
     fetchParties();
@@ -129,15 +133,15 @@ const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
 
         // If end_date exists, check it
         if (party.end_date) {
-            return new Date(party.end_date) > now;
+          return new Date(party.end_date) > now;
         }
 
         // If no end_date, check the start date
         if (party.date) {
-            // Assume party ends 12 hours after start if no end_date specified
-            const startDate = new Date(party.date);
-            const twelveHoursAgo = new Date(now.getTime() - 12 * 60 * 60 * 1000);
-            return startDate > twelveHoursAgo;
+          // Assume party ends 12 hours after start if no end_date specified
+          const startDate = new Date(party.date);
+          const twelveHoursAgo = new Date(now.getTime() - 12 * 60 * 60 * 1000);
+          return startDate > twelveHoursAgo;
         }
 
         return true; // Fallback
@@ -163,8 +167,18 @@ const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
           let isReposted = false;
           if (user) {
             const [likeRes, repostRes] = await Promise.all([
-              supabase.from("party_likes").select("id").eq("party_id", party.id).eq("user_id", user.id).single(),
-              supabase.from("party_reposts").select("id").eq("party_id", party.id).eq("user_id", user.id).single(),
+              supabase
+                .from("party_likes")
+                .select("id")
+                .eq("party_id", party.id)
+                .eq("user_id", user.id)
+                .single(),
+              supabase
+                .from("party_reposts")
+                .select("id")
+                .eq("party_id", party.id)
+                .eq("user_id", user.id)
+                .single(),
             ]);
             isLiked = !!likeRes.data;
             isReposted = !!repostRes.data;
@@ -179,8 +193,11 @@ const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
           // Sort media: primary first, then by display_order
           if (party.media && Array.isArray(party.media)) {
             // Filter out non-http(s) urls (broken legacy local paths)
-            party.media = party.media.filter((m: any) => 
-               m.media_url && (m.media_url.startsWith("http") || m.media_url.startsWith("https"))
+            party.media = party.media.filter(
+              (m: any) =>
+                m.media_url &&
+                (m.media_url.startsWith("http") ||
+                  m.media_url.startsWith("https")),
             );
 
             party.media.sort((a: any, b: any) => {
@@ -205,11 +222,15 @@ const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
       partiesWithEngagement.sort((a, b) => {
         const aCity = (a.city || "").toLowerCase();
         const bCity = (b.city || "").toLowerCase();
-        const aMatchesCity = userCity && (aCity.includes(userCity) || userCity.includes(aCity));
-        const bMatchesCity = userCity && (bCity.includes(userCity) || userCity.includes(bCity));
+        const aMatchesCity =
+          userCity && (aCity.includes(userCity) || userCity.includes(aCity));
+        const bMatchesCity =
+          userCity && (bCity.includes(userCity) || userCity.includes(bCity));
         if (aMatchesCity && !bMatchesCity) return -1;
         if (!aMatchesCity && bMatchesCity) return 1;
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        return (
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
       });
 
       setParties(partiesWithEngagement);
@@ -287,21 +308,35 @@ const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
     setParties(
       parties.map((p) =>
         p.id === partyId
-          ? { ...p, is_reposted: !wasReposted, reposts_count: (p.reposts_count || 0) + (wasReposted ? -1 : 1) }
+          ? {
+              ...p,
+              is_reposted: !wasReposted,
+              reposts_count: (p.reposts_count || 0) + (wasReposted ? -1 : 1),
+            }
           : p,
       ),
     );
     try {
       if (wasReposted) {
-        await supabase.from("party_reposts").delete().eq("party_id", partyId).eq("user_id", user.id);
+        await supabase
+          .from("party_reposts")
+          .delete()
+          .eq("party_id", partyId)
+          .eq("user_id", user.id);
       } else {
-        await supabase.from("party_reposts").insert({ party_id: partyId, user_id: user.id });
+        await supabase
+          .from("party_reposts")
+          .insert({ party_id: partyId, user_id: user.id });
       }
     } catch (e) {
       setParties(
         parties.map((p) =>
           p.id === partyId
-            ? { ...p, is_reposted: wasReposted, reposts_count: (p.reposts_count || 0) + (wasReposted ? 1 : -1) }
+            ? {
+                ...p,
+                is_reposted: wasReposted,
+                reposts_count: (p.reposts_count || 0) + (wasReposted ? 1 : -1),
+              }
             : p,
         ),
       );
@@ -348,16 +383,16 @@ const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
           onPress={() =>
             router.push({
               pathname: "/host/[id]",
-              params: { id: party.host_profile?.id ?? party.host_id }
+              params: { id: party.host_profile?.id ?? party.host_id },
             })
           }
         >
           {party.host_profile?.avatar_url ? (
             <Image
-  source={{ uri: party.host_profile.avatar_url }}
-  style={{ width: 40, height: 40, borderRadius: 48 }}
-  resizeMode="cover"
-/>
+              source={{ uri: party.host_profile.avatar_url }}
+              style={{ width: 40, height: 40, borderRadius: 48 }}
+              resizeMode="cover"
+            />
           ) : (
             <View className="w-11 h-11 rounded-full bg-purple-600 items-center justify-center border border-white/10">
               <Text className="text-white font-bold text-lg">
@@ -375,54 +410,58 @@ const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
           </View>
           {party.host?.is_host && (
             <View className="bg-purple-500/10 px-3 py-1.5 rounded-full border border-purple-500/20">
-              <Text className="text-purple-400 text-xs font-bold tracking-wider">HOST</Text>
+              <Text className="text-purple-400 text-xs font-bold tracking-wider">
+                HOST
+              </Text>
             </View>
           )}
         </TouchableOpacity>
 
         {/* Party Gallery / Flyer */}
         <View className="px-4">
-            <View className="rounded-2xl overflow-hidden bg-[#09030e] border border-white/5">
-              {party.media && party.media.length > 0 ? (
-                <MediaGalleryViewer
-                  media={party.media}
-                   isActive={party.id === activePartyId}
-  instanceId={party.id}
-                  onPress={() =>{
-                    setActivePartyId(null);
-                    router.push({
-                      pathname: "/party/[id]",
-                      params: { id: party.id },
-                    })}
-                  }
-                  aspectRatio={4 / 5}
-                />
-              ) : (party.flyer_url && (party.flyer_url.startsWith('http') || party.flyer_url.startsWith('https'))) ? (
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  onPress={() =>
-                    router.push({
-                      pathname: "/party/[id]",
-                      params: { id: party.id },
-                    })
-                  }
-                >
-                  <RNImage
-                    source={{ uri: party.flyer_url }}
-                    className="w-full"
-                    style={{ aspectRatio: 4 / 5 }}
-                    resizeMode="cover"
-                  />
-                </TouchableOpacity>
-              ) : (
-                <View
-                  className="w-full items-center justify-center"
+          <View className="rounded-2xl overflow-hidden bg-[#09030e] border border-white/5">
+            {party.media && party.media.length > 0 ? (
+              <MediaGalleryViewer
+                media={party.media}
+                isActive={isFeedActive && party.id === activePartyId}
+                instanceId={party.id}
+                onPress={() => {
+                  setActivePartyId(null);
+                  router.push({
+                    pathname: "/party/[id]",
+                    params: { id: party.id },
+                  });
+                }}
+                aspectRatio={4 / 5}
+              />
+            ) : party.flyer_url &&
+              (party.flyer_url.startsWith("http") ||
+                party.flyer_url.startsWith("https")) ? (
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={() =>
+                  router.push({
+                    pathname: "/party/[id]",
+                    params: { id: party.id },
+                  })
+                }
+              >
+                <RNImage
+                  source={{ uri: party.flyer_url }}
+                  className="w-full"
                   style={{ aspectRatio: 4 / 5 }}
-                >
-                  <Ionicons name="image-outline" size={48} color="#333" />
-                </View>
-              )}
-            </View>
+                  resizeMode="cover"
+                />
+              </TouchableOpacity>
+            ) : (
+              <View
+                className="w-full items-center justify-center"
+                style={{ aspectRatio: 4 / 5 }}
+              >
+                <Ionicons name="image-outline" size={48} color="#333" />
+              </View>
+            )}
+          </View>
         </View>
 
         {/* Engagement Bar */}
@@ -443,7 +482,9 @@ const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
 
           <TouchableOpacity
             className="flex-row items-center mr-6"
-            onPress={() => router.push({ pathname: "/party/[id]", params: { id: party.id } })}
+            onPress={() =>
+              router.push({ pathname: "/party/[id]", params: { id: party.id } })
+            }
           >
             <Ionicons name="chatbubble-outline" size={26} color="#a3a3a3" />
             <Text className="text-gray-300 ml-1.5 font-medium text-base">
@@ -464,7 +505,6 @@ const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
               {party.reposts_count || 0}
             </Text>
           </TouchableOpacity>
-
         </View>
 
         {/* Party Info */}
@@ -474,7 +514,10 @@ const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
           </Text>
 
           {party.description && (
-            <Text className="text-gray-400 text-sm mb-4 leading-relaxed" numberOfLines={2}>
+            <Text
+              className="text-gray-400 text-sm mb-4 leading-relaxed"
+              numberOfLines={2}
+            >
               {party.description}
             </Text>
           )}
@@ -504,7 +547,9 @@ const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
                 key={genre}
                 className="bg-[#1e142e] border border-purple-500/20 px-3 py-1 rounded-full"
               >
-                <Text className="text-purple-300 font-medium text-xs">{genre}</Text>
+                <Text className="text-purple-300 font-medium text-xs">
+                  {genre}
+                </Text>
               </View>
             ))}
           </View>
@@ -544,8 +589,12 @@ const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
       {/* Header */}
       <View className="pt-16 pb-4 px-6 flex-row justify-between items-center">
         <View>
-          <Text className="text-white text-3xl font-extrabold tracking-tight">Discover</Text>
-          <Text className="text-gray-400 text-sm mt-1">Find your next experience</Text>
+          <Text className="text-white text-3xl font-extrabold tracking-tight">
+            Discover
+          </Text>
+          <Text className="text-gray-400 text-sm mt-1">
+            Find your next experience
+          </Text>
         </View>
         <TouchableOpacity
           onPress={() => router.push("/(app)/search")}
@@ -566,7 +615,7 @@ const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
           </View>
         )}
         onViewableItemsChanged={onViewableItemsChanged}
-  viewabilityConfig={viewabilityConfig}
+        viewabilityConfig={viewabilityConfig}
         keyExtractor={(item) => item.id}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 100 }}
@@ -580,9 +629,11 @@ const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
         ListEmptyComponent={
           <View className=" items-center justify-center py-32">
             <View className="w-20 h-20 rounded-full bg-[#150d1e] items-center justify-center mb-6 border border-white/5">
-                <Ionicons name="calendar-outline" size={32} color="#a855f7" />
+              <Ionicons name="calendar-outline" size={32} color="#a855f7" />
             </View>
-            <Text className="text-gray-200 text-xl font-bold mb-2">No parties yet</Text>
+            <Text className="text-gray-200 text-xl font-bold mb-2">
+              No parties yet
+            </Text>
             <Text className="text-gray-500 text-center max-w-[80%]">
               Come back later or be the first to create one!
             </Text>

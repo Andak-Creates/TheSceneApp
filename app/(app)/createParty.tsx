@@ -96,7 +96,9 @@ export default function CreatePartyScreen() {
 
   // Host Profile State
   const [hostProfiles, setHostProfiles] = useState<any[]>([]);
-  const [selectedHostProfile, setSelectedHostProfile] = useState<string | null>(null);
+  const [selectedHostProfile, setSelectedHostProfile] = useState<string | null>(
+    null,
+  );
   const [loadingProfiles, setLoadingProfiles] = useState(true);
 
   // Combined check for verification and host profiles
@@ -112,9 +114,11 @@ export default function CreatePartyScreen() {
           .eq("id", user.id)
           .single();
 
-        const isVerified = (profileRow?.host_verified_at !== null && profileRow?.host_verified_at !== undefined) || 
-                          profileRow?.host_verification_status === "approved" || 
-                          profileRow?.is_host;
+        const isVerified =
+          (profileRow?.host_verified_at !== null &&
+            profileRow?.host_verified_at !== undefined) ||
+          profileRow?.host_verification_status === "approved" ||
+          profileRow?.is_host;
 
         if (!isVerified) {
           const { data: verification } = await supabase
@@ -140,9 +144,14 @@ export default function CreatePartyScreen() {
         if (!profiles || profiles.length === 0) {
           // No brand profiles found - redirect to setup
           Alert.alert(
-            "Final Step", 
+            "Final Step",
             "You're verified! Now, create a host brand (profile) to publish your parties.",
-            [{ text: "Setup Brand", onPress: () => router.replace("/(app)/host-profile-setup") }]
+            [
+              {
+                text: "Setup Brand",
+                onPress: () => router.replace("/(app)/host-profile-setup"),
+              },
+            ],
           );
           return;
         }
@@ -160,7 +169,6 @@ export default function CreatePartyScreen() {
 
     checkHostingReady();
   }, [user?.id]);
-
 
   // Reset form on mount
   useEffect(() => {
@@ -192,7 +200,7 @@ export default function CreatePartyScreen() {
     setTicketTiers([
       { id: "1", name: "General Admission", price: "", quantity: "" },
     ]);
-    
+
     // Fetch and set user's preferred currency
     let prefCurr = "NGN";
     if (user?.id) {
@@ -201,7 +209,7 @@ export default function CreatePartyScreen() {
     } else {
       setCurrency("NGN");
     }
-    
+
     setCurrency(prefCurr);
     setSelectedHostProfile(hostProfiles.length > 0 ? hostProfiles[0].id : null);
     setError("");
@@ -388,11 +396,14 @@ export default function CreatePartyScreen() {
           });
         } catch (uploadError) {
           console.error("Error uploading media item:", uploadError);
-          throw new Error("Failed to upload some media files. Please try again.");
+          throw new Error(
+            "Failed to upload some media files. Please try again.",
+          );
         }
       }
 
-      const primaryMedia = uploadedMedia.find((m) => m.isPrimary) || uploadedMedia[0];
+      const primaryMedia =
+        uploadedMedia.find((m) => m.isPrimary) || uploadedMedia[0];
       const primaryUrl = primaryMedia?.uploadedUrl || "";
 
       // 2. Parse date and time
@@ -552,7 +563,9 @@ export default function CreatePartyScreen() {
             <Ionicons name="arrow-back" size={20} color="#fff" />
           </TouchableOpacity>
 
-          <Text className="text-white text-lg font-extrabold tracking-wide">Create Party</Text>
+          <Text className="text-white text-lg font-extrabold tracking-wide">
+            Create Party
+          </Text>
 
           <View style={{ width: 40 }} />
         </View>
@@ -586,7 +599,9 @@ export default function CreatePartyScreen() {
           {error ? (
             <View className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 mb-6 flex-row items-center">
               <Ionicons name="warning" size={20} color="#f87171" />
-              <Text className="text-red-400 text-sm font-semibold ml-3 flex-1">{error}</Text>
+              <Text className="text-red-400 text-sm font-semibold ml-3 flex-1">
+                {error}
+              </Text>
             </View>
           ) : null}
 
@@ -594,12 +609,15 @@ export default function CreatePartyScreen() {
           {currentStep === 1 && (
             <View className="animate-fade-in">
               <View className="mb-8">
-                <Text className="text-purple-400 text-sm font-bold uppercase tracking-widest mb-2">Step 1</Text>
+                <Text className="text-purple-400 text-sm font-bold uppercase tracking-widest mb-2">
+                  Step 1
+                </Text>
                 <Text className="text-white text-4xl font-extrabold mb-2 tracking-tight">
                   Visuals
                 </Text>
                 <Text className="text-gray-400 text-base">
-                  Add images and videos to showcase your event. First item will be the cover.
+                  Add images and videos to showcase your event. First item will
+                  be the cover.
                 </Text>
               </View>
 
@@ -615,7 +633,9 @@ export default function CreatePartyScreen() {
           {currentStep === 2 && (
             <View className="animate-fade-in">
               <View className="mb-8">
-                <Text className="text-purple-400 text-sm font-bold uppercase tracking-widest mb-2">Step 2</Text>
+                <Text className="text-purple-400 text-sm font-bold uppercase tracking-widest mb-2">
+                  Step 2
+                </Text>
                 <Text className="text-white text-4xl font-extrabold mb-2 tracking-tight">
                   The Basics
                 </Text>
@@ -655,14 +675,18 @@ export default function CreatePartyScreen() {
                             : "bg-white/5 border-white/10"
                         }`}
                       >
-                        <Text className="text-white font-medium">{hp.name}</Text>
+                        <Text className="text-white font-medium">
+                          {hp.name}
+                        </Text>
                       </TouchableOpacity>
                     ))}
                     <TouchableOpacity
                       onPress={() => router.push("/(app)/host-profile-setup")}
                       className="px-4 py-2 rounded-xl border border-dashed border-white/20 bg-white/5"
                     >
-                      <Text className="text-gray-400 font-medium">+ New Profile</Text>
+                      <Text className="text-gray-400 font-medium">
+                        + New Profile
+                      </Text>
                     </TouchableOpacity>
                   </View>
                 ) : (
@@ -671,8 +695,12 @@ export default function CreatePartyScreen() {
                     className="bg-purple-600/20 border border-dashed border-purple-500/50 rounded-xl p-4 items-center"
                   >
                     <Ionicons name="add-circle" size={24} color="#a855f7" />
-                    <Text className="text-purple-400 font-bold mt-2">Create Host Profile</Text>
-                    <Text className="text-gray-400 text-xs text-center mt-1">You need a host profile to publish parties</Text>
+                    <Text className="text-purple-400 font-bold mt-2">
+                      Create Host Profile
+                    </Text>
+                    <Text className="text-gray-400 text-xs text-center mt-1">
+                      You need a host profile to publish parties
+                    </Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -984,8 +1012,10 @@ export default function CreatePartyScreen() {
                         setLocation(data.description);
                         // Extract city from details if available
                         if (details) {
-                          const cityComp = details.address_components.find(c => 
-                            c.types.includes("locality") || c.types.includes("administrative_area_level_2")
+                          const cityComp = details.address_components.find(
+                            (c) =>
+                              c.types.includes("locality") ||
+                              c.types.includes("administrative_area_level_2"),
                           );
                           if (cityComp) setCity(cityComp.long_name);
                         }
@@ -998,22 +1028,23 @@ export default function CreatePartyScreen() {
                       fetchDetails={true}
                       textInputProps={{
                         placeholderTextColor: "#666",
-                        className: "bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white mb-3",
+                        className:
+                          "bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-black mb-3",
                         value: location,
                         onChangeText: setLocation,
                       }}
                       styles={{
                         container: { flex: 0 },
-                        listView: { 
+                        listView: {
                           backgroundColor: "#191022",
                           borderWidth: 1,
                           borderColor: "rgba(255,255,255,0.1)",
                           borderRadius: 8,
-                          position: 'absolute',
+                          position: "absolute",
                           top: 55,
                         },
                         description: { color: "#fff" },
-                        row: { backgroundColor: 'transparent', padding: 13 },
+                        row: { backgroundColor: "transparent", padding: 13 },
                       }}
                     />
                     <TextInput
@@ -1033,7 +1064,9 @@ export default function CreatePartyScreen() {
           {currentStep === 3 && (
             <View className="animate-fade-in mb-6">
               <View className="mb-8">
-                <Text className="text-purple-400 text-sm font-bold uppercase tracking-widest mb-2">Step 3</Text>
+                <Text className="text-purple-400 text-sm font-bold uppercase tracking-widest mb-2">
+                  Step 3
+                </Text>
                 <Text className="text-white text-4xl font-extrabold mb-2 tracking-tight">
                   Set the Vibe
                 </Text>
@@ -1058,7 +1091,13 @@ export default function CreatePartyScreen() {
                       }`}
                       style={
                         selectedGenres.includes(genre)
-                          ? { shadowColor: '#9333ea', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 }
+                          ? {
+                              shadowColor: "#9333ea",
+                              shadowOffset: { width: 0, height: 4 },
+                              shadowOpacity: 0.3,
+                              shadowRadius: 8,
+                              elevation: 8,
+                            }
                           : undefined
                       }
                       activeOpacity={0.8}
@@ -1093,7 +1132,13 @@ export default function CreatePartyScreen() {
                       }`}
                       style={
                         selectedVibes.includes(vibe)
-                          ? { shadowColor: '#9333ea', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 }
+                          ? {
+                              shadowColor: "#9333ea",
+                              shadowOffset: { width: 0, height: 4 },
+                              shadowOpacity: 0.3,
+                              shadowRadius: 8,
+                              elevation: 8,
+                            }
                           : undefined
                       }
                       activeOpacity={0.8}
@@ -1118,7 +1163,9 @@ export default function CreatePartyScreen() {
           {currentStep === 4 && (
             <View className="animate-fade-in">
               <View className="mb-8">
-                <Text className="text-purple-400 text-sm font-bold uppercase tracking-widest mb-2">Step 4</Text>
+                <Text className="text-purple-400 text-sm font-bold uppercase tracking-widest mb-2">
+                  Step 4
+                </Text>
                 <Text className="text-white text-4xl font-extrabold mb-2 tracking-tight">
                   Ticket Tiers
                 </Text>
@@ -1160,11 +1207,7 @@ export default function CreatePartyScreen() {
                           onPress={() => removeTicketTier(tier.id)}
                           className="bg-red-500/10 p-2 rounded-full"
                         >
-                          <Ionicons
-                            name="trash"
-                            size={18}
-                            color="#ef4444"
-                          />
+                          <Ionicons name="trash" size={18} color="#ef4444" />
                         </TouchableOpacity>
                       )}
                     </View>
@@ -1210,11 +1253,7 @@ export default function CreatePartyScreen() {
                   activeOpacity={0.8}
                   className="flex-row items-center justify-center bg-[#150d1e] border border-purple-500/20 rounded-2xl py-4 mt-2"
                 >
-                  <Ionicons
-                    name="add-circle"
-                    size={22}
-                    color="#a855f7"
-                  />
+                  <Ionicons name="add-circle" size={22} color="#a855f7" />
                   <Text className="text-purple-400 font-bold ml-2.5 text-base">
                     Add Another Tier
                   </Text>
@@ -1227,7 +1266,9 @@ export default function CreatePartyScreen() {
           {currentStep === 5 && (
             <View className="animate-fade-in mb-6">
               <View className="mb-8">
-                <Text className="text-purple-400 text-sm font-bold uppercase tracking-widest mb-2">Step 5</Text>
+                <Text className="text-purple-400 text-sm font-bold uppercase tracking-widest mb-2">
+                  Step 5
+                </Text>
                 <Text className="text-white text-4xl font-extrabold mb-2 tracking-tight">
                   Preview
                 </Text>
@@ -1276,7 +1317,9 @@ export default function CreatePartyScreen() {
                       key={genre}
                       className="bg-purple-600/10 border border-purple-500/20 px-3 py-1.5 rounded-full"
                     >
-                      <Text className="text-purple-300 font-semibold text-xs">{genre}</Text>
+                      <Text className="text-purple-300 font-semibold text-xs">
+                        {genre}
+                      </Text>
                     </View>
                   ))}
                 </View>
@@ -1284,24 +1327,31 @@ export default function CreatePartyScreen() {
 
               {/* Ticket Tiers Preview */}
               <View className="bg-[#150d1e] border border-white/5 rounded-3xl p-6">
-                <Text className="text-white font-extrabold text-lg mb-4">Ticket Tiers</Text>
+                <Text className="text-white font-extrabold text-lg mb-4">
+                  Ticket Tiers
+                </Text>
                 {priceTBA ? (
                   <Text className="text-gray-500 font-medium italic bg-[#09030e] p-4 rounded-xl">
                     Price To Be Announced
                   </Text>
                 ) : (
                   <View className="bg-[#09030e] rounded-2xl overflow-hidden border border-white/5">
-                  {ticketTiers.map((tier, index) => (
-                    <View
-                      key={tier.id}
-                      className={`flex-row justify-between items-center p-4 ${index !== ticketTiers.length - 1 ? 'border-b border-white/5' : ''}`}
-                    >
-                      <Text className="text-gray-300 font-semibold">{tier.name}</Text>
-                      <Text className="text-white font-bold">
-                        {currency} {tier.price} <Text className="text-gray-500 font-normal">({tier.quantity})</Text>
-                      </Text>
-                    </View>
-                  ))}
+                    {ticketTiers.map((tier, index) => (
+                      <View
+                        key={tier.id}
+                        className={`flex-row justify-between items-center p-4 ${index !== ticketTiers.length - 1 ? "border-b border-white/5" : ""}`}
+                      >
+                        <Text className="text-gray-300 font-semibold">
+                          {tier.name}
+                        </Text>
+                        <Text className="text-white font-bold">
+                          {currency} {tier.price}{" "}
+                          <Text className="text-gray-500 font-normal">
+                            ({tier.quantity})
+                          </Text>
+                        </Text>
+                      </View>
+                    ))}
                   </View>
                 )}
               </View>
@@ -1316,7 +1366,9 @@ export default function CreatePartyScreen() {
                 activeOpacity={0.8}
                 className="bg-white py-4 flex-row justify-center rounded-2xl items-center shadow-lg shadow-white/10"
               >
-                <Text className="text-black text-lg font-extrabold pb-1">Continue</Text>
+                <Text className="text-black text-lg font-extrabold pb-1">
+                  Continue
+                </Text>
               </TouchableOpacity>
             ) : (
               <TouchableOpacity
