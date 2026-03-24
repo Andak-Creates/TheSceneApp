@@ -24,11 +24,13 @@ interface WithdrawalRequest {
   host: {
     username: string;
     full_name: string | null;
+    host_verification_status: string | null;
   };
   bank_account: {
     bank_name: string;
     account_number: string;
     account_name: string;
+    recipient_code: string | null;
   };
 }
 
@@ -87,8 +89,8 @@ export default function AdminConsole() {
         .from("withdrawal_requests")
         .select(`
           *,
-          host:profiles(username, full_name),
-          bank_account:host_bank_accounts(bank_name, account_number, account_name)
+          host:profiles(username, full_name, host_verification_status),
+          bank_account:host_bank_accounts(bank_name, account_number, account_name, recipient_code)
         `)
         .order("created_at", { ascending: false });
 
@@ -147,6 +149,14 @@ export default function AdminConsole() {
           .eq("id", userId);
 
         if (profileError) throw profileError;
+
+        // Also verify all host profiles owned by this user
+        const { error: hostProfileError } = await supabase
+          .from("host_profiles")
+          .update({ is_verified: true })
+          .eq("owner_id", userId);
+
+        if (hostProfileError) throw hostProfileError;
       }
 
       Alert.alert("Success", approved ? "Host verification approved. They can now create parties." : "Host verification rejected.");
@@ -159,19 +169,41 @@ export default function AdminConsole() {
     }
   };
 
-  const handleProcess = async (requestId: string, newStatus: 'completed' | 'rejected') => {
-    setProcessingId(requestId);
+  const handleProcess = async (item: WithdrawalRequest, newStatus: 'completed' | 'rejected') => {
+    setProcessingId(item.id);
     try {
       const { error } = await supabase
         .from("withdrawal_requests")
-        .update({ 
+        .update({
           status: newStatus,
           processed_at: new Date().toISOString()
         })
-        .eq("id", requestId);
+        .eq("id", item.id);
 
       if (error) throw error;
-      Alert.alert("Success", `Request marked as ${newStatus}`);
+
+      // If completing a VERIFIED host's request, trigger automated Paystack transfer
+      const isVerifiedHost = item.host?.host_verification_status === "approved";
+      if (newStatus === "completed" && isVerifiedHost) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          await supabase.functions.invoke("process-payout", {
+            body: { record: { ...item, status: "approved" } },
+            headers: session?.access_token
+              ? { Authorization: `Bearer ${session.access_token}` }
+              : undefined,
+          });
+        } catch (payoutErr) {
+          // Log but don't block — the DB row is already marked completed
+          console.error("Paystack transfer trigger failed:", payoutErr);
+          Alert.alert(
+            "Manually Verify Transfer",
+            "The request was marked complete but the Paystack auto-transfer failed. Please send the funds manually and check the edge function logs."
+          );
+        }
+      }
+
+      Alert.alert("Success", `Request ${newStatus === 'completed' ? 'completed' : 'rejected'}.`);
       fetchRequests();
       fetchVerifications();
     } catch (err) {
@@ -182,79 +214,119 @@ export default function AdminConsole() {
     }
   };
 
-  const renderRequestItem = ({ item }: { item: WithdrawalRequest }) => (
-    <View className="bg-white/5 mx-6 mb-4 p-5 rounded-3xl border border-white/10">
-      <View className="flex-row justify-between items-start mb-4">
-        <View>
-          <Text className="text-white text-lg font-bold">
-            ₦{item.amount.toLocaleString()}
-          </Text>
-          <Text className="text-gray-400 text-xs">
-            {new Date(item.created_at).toLocaleDateString()} at {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </Text>
+  const renderRequestItem = ({ item }: { item: WithdrawalRequest }) => {
+    const isVerifiedHost = item.host?.host_verification_status === "approved";
+    return (
+      <View className="bg-white/5 mx-6 mb-4 p-5 rounded-3xl border border-white/10">
+        <View className="flex-row justify-between items-start mb-4">
+          <View>
+            <Text className="text-white text-lg font-bold">
+              ₦{item.amount.toLocaleString()}
+            </Text>
+            <Text className="text-gray-400 text-xs">
+              {new Date(item.created_at).toLocaleDateString()} at {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </Text>
+          </View>
+          <View className="flex-row gap-2 items-center">
+            {/* Verified / Unverified badge */}
+            <View className={`px-2 py-1 rounded-full flex-row items-center gap-1 ${
+              isVerifiedHost ? "bg-green-500/20" : "bg-orange-500/20"
+            }`}>
+              <Ionicons
+                name={isVerifiedHost ? "shield-checkmark" : "shield-outline"}
+                size={11}
+                color={isVerifiedHost ? "#22c55e" : "#f97316"}
+              />
+              <Text className={`text-xs font-bold ${
+                isVerifiedHost ? "text-green-400" : "text-orange-400"
+              }`}>
+                {isVerifiedHost ? "Verified" : "Unverified"}
+              </Text>
+            </View>
+            {/* Status badge */}
+            <View className={`px-3 py-1 rounded-full ${
+              item.status === 'pending' ? 'bg-orange-500/20' :
+              item.status === 'completed' ? 'bg-green-500/20' : 'bg-red-500/20'
+            }`}>
+              <Text className={`text-xs font-bold capitalize ${
+                item.status === 'pending' ? 'text-orange-500' :
+                item.status === 'completed' ? 'text-green-500' : 'text-red-500'
+              }`}>
+                {item.status}
+              </Text>
+            </View>
+          </View>
         </View>
-        <View className={`px-3 py-1 rounded-full ${
-          item.status === 'pending' ? 'bg-orange-500/20' : 
-          item.status === 'completed' ? 'bg-green-500/20' : 'bg-red-500/20'
-        }`}>
-          <Text className={`text-xs font-bold capitalize ${
-            item.status === 'pending' ? 'text-orange-500' : 
-            item.status === 'completed' ? 'text-green-500' : 'text-red-500'
-          }`}>
-            {item.status}
-          </Text>
-        </View>
-      </View>
 
-      <View className="border-t border-white/5 pt-4 mb-4">
-        <Text className="text-purple-400 text-xs font-bold uppercase mb-2">Host Details</Text>
-        <Text className="text-white font-medium">{item.host?.full_name || item.host?.username}</Text>
-        
-        <Text className="text-purple-400 text-xs font-bold uppercase mb-2 mt-4">Bank Details</Text>
-        <Text className="text-white">{item.bank_account?.bank_name}</Text>
-        <Text className="text-gray-400 text-sm">{item.bank_account?.account_number}</Text>
-        <Text className="text-gray-400 text-sm">{item.bank_account?.account_name}</Text>
-      </View>
+        <View className="border-t border-white/5 pt-4 mb-4">
+          <Text className="text-purple-400 text-xs font-bold uppercase mb-2">Host Details</Text>
+          <Text className="text-white font-medium">{item.host?.full_name || item.host?.username}</Text>
 
-      {item.status === 'pending' && (
-        <View className="flex-row gap-3">
-          <TouchableOpacity
-            onPress={() => Alert.alert(
-              "Reject Request", 
-              "Are you sure you want to reject this payout?",
-              [
-                { text: "Cancel", style: "cancel" },
-                { text: "Reject", style: "destructive", onPress: () => handleProcess(item.id, 'rejected') }
-              ]
-            )}
-            disabled={!!processingId}
-            className="flex-1 bg-red-500/10 py-3 rounded-xl items-center"
-          >
-            <Text className="text-red-500 font-bold">Reject</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            onPress={() => Alert.alert(
-              "Complete Payout", 
-              "Has the money been sent to the host?",
-              [
-                { text: "Cancel", style: "cancel" },
-                { text: "Yes, Completed", onPress: () => handleProcess(item.id, 'completed') }
-              ]
-            )}
-            disabled={!!processingId}
-            className="flex-3 bg-green-500 py-3 rounded-xl items-center"
-          >
-            {processingId === item.id ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <Text className="text-white font-bold">Mark Completed</Text>
-            )}
-          </TouchableOpacity>
+          <Text className="text-purple-400 text-xs font-bold uppercase mb-2 mt-4">Bank Details</Text>
+          <Text className="text-white">{item.bank_account?.bank_name}</Text>
+          <Text className="text-gray-400 text-sm">{item.bank_account?.account_number}</Text>
+          <Text className="text-gray-400 text-sm">{item.bank_account?.account_name}</Text>
+
+          {!isVerifiedHost && (
+            <View className="mt-3 bg-orange-500/10 border border-orange-500/20 rounded-lg px-3 py-2">
+              <Text className="text-orange-400 text-xs">
+                ⚠️ Unverified host — process payment manually then mark complete.
+              </Text>
+            </View>
+          )}
+          {isVerifiedHost && (
+            <View className="mt-3 bg-green-500/10 border border-green-500/20 rounded-lg px-3 py-2">
+              <Text className="text-green-400 text-xs">
+                ✓ Verified host — approving will auto-trigger Paystack transfer.
+              </Text>
+            </View>
+          )}
         </View>
-      )}
-    </View>
-  );
+
+        {item.status === 'pending' && (
+          <View className="flex-row gap-3">
+            <TouchableOpacity
+              onPress={() => Alert.alert(
+                "Reject Request",
+                "Are you sure you want to reject this payout?",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  { text: "Reject", style: "destructive", onPress: () => handleProcess(item, 'rejected') }
+                ]
+              )}
+              disabled={!!processingId}
+              className="flex-1 bg-red-500/10 py-3 rounded-xl items-center"
+            >
+              <Text className="text-red-500 font-bold">Reject</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => Alert.alert(
+                isVerifiedHost ? "Approve & Transfer" : "Mark as Completed",
+                isVerifiedHost
+                  ? `This will auto-transfer ₦${item.amount.toLocaleString()} to ${item.bank_account?.account_name} via Paystack. Continue?`
+                  : "Have you manually sent the funds to this host?",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  { text: isVerifiedHost ? "Yes, Transfer" : "Yes, Completed", onPress: () => handleProcess(item, 'completed') }
+                ]
+              )}
+              disabled={!!processingId}
+              className="flex-3 bg-green-500 py-3 rounded-xl items-center"
+            >
+              {processingId === item.id ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text className="text-white font-bold">
+                  {isVerifiedHost ? "Approve & Transfer" : "Mark Completed"}
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+    );
+  };
 
   const renderVerificationItem = ({ item }: { item: HostVerification }) => (
     <View className="bg-white/5 mx-6 mb-4 p-5 rounded-3xl border border-white/10">

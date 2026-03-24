@@ -1,3 +1,4 @@
+import { sendPush } from "@/lib/sendPush";
 import { useAudioStore } from "@/stores/audioStore";
 import { Ionicons } from "@expo/vector-icons";
 import { Image as ExpoImage } from "expo-image";
@@ -226,6 +227,28 @@ export default function HostProfileScreen() {
           follower_id: user.id,
           following_id: profile.owner_id,
         });
+
+        const { data: followerProfile } = await supabase
+  .from("profiles")
+  .select("username")
+  .eq("id", user.id)
+  .single();
+
+await supabase.from("notifications").insert({
+  user_id: profile.owner_id,
+  title: "👤 New follower",
+  body: `${followerProfile?.username || "Someone"} started following ${profile.name}`,
+  type: "host_follower",
+  data: { follower_id: user.id, host_profile_id: hostProfileId },
+  is_read: false,
+});
+
+sendPush(
+  profile.owner_id,
+  "👤 New follower",
+  `${followerProfile?.username || "Someone"} started following ${profile.name}`,
+  { type: "host_follower", follower_id: user.id, host_profile_id: hostProfileId }
+);
       }
     } catch (error) {
       console.error("Error toggling follow:", error);
@@ -346,21 +369,20 @@ export default function HostProfileScreen() {
           )}
 
           <View className="items-center mb-3">
-            <Text className="text-white text-2xl font-bold">
-              {profile.name}
-            </Text>
+            <View className="flex-row items-center gap-2">
+              <Text className="text-white text-2xl font-bold">
+                {profile.name}
+              </Text>
+              {profile.is_verified && (
+                <Ionicons name="checkmark-circle" size={15} color="#a855f7" />
+              )}
+            </View>
             {profile.owner?.username && (
               <Text className="text-gray-400 text-base">
                 @{profile.owner.username}
               </Text>
             )}
           </View>
-
-          {profile.is_verified && (
-            <View className="bg-purple-600/20 px-4 py-2 rounded-full mb-3">
-              <Text className="text-purple-400 font-bold">VERIFIED HOST</Text>
-            </View>
-          )}
 
           {profile.bio && (
             <Text className="text-gray-300 text-center px-8 mb-4">

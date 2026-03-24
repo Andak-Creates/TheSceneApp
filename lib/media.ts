@@ -1,11 +1,8 @@
 import { decode } from "base64-arraybuffer";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
+import * as VideoThumbnails from "expo-video-thumbnails";
 import { supabase } from "./supabase";
-
-/**
- * Media upload and processing utilities
- */
 
 export interface MediaUploadResult {
   url: string;
@@ -19,45 +16,73 @@ export interface MediaUploadResult {
 export async function uploadPartyMedia(
   partyId: string,
   uri: string,
-  type: "image" | "video"
+  type: "image" | "video",
 ): Promise<MediaUploadResult> {
   try {
-    // Read file as base64
-    const base64 = await FileSystem.readAsStringAsync(uri, {
-      encoding: "base64",
-    });
-
-    // Generate unique filename
-    const fileExt = uri.split(".").pop();
+    const fileExt =
+      uri.split(".").pop()?.toLowerCase() || (type === "video" ? "mov" : "jpg");
     const fileName = `${partyId}/${type}_${Date.now()}.${fileExt}`;
     const filePath = `party-media/${fileName}`;
 
-    // Upload to Supabase storage
-    const { data, error } = await supabase.storage
-      .from("flyers")
-      .upload(filePath, decode(base64), {
-        contentType: type === "image" ? "image/jpeg" : "video/mp4",
-        upsert: false,
-      });
+    let uploadData: ArrayBuffer;
+    let contentType: string;
 
-    if (error) {
-      throw error;
+    if (type === "video") {
+      // Use fetch+arrayBuffer for videos — base64 is too slow/crashes for large files
+      const response = await fetch(uri);
+      uploadData = await response.arrayBuffer();
+      contentType = fileExt === "mp4" ? "video/mp4" : "video/quicktime";
+    } else {
+      // Use base64 for images
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: "base64",
+      });
+      uploadData = decode(base64);
+      contentType = "image/jpeg";
     }
 
-    // Get public URL
+    const { data, error } = await supabase.storage
+      .from("flyers")
+      .upload(filePath, uploadData, { contentType, upsert: false });
+
+    if (error) throw error;
+
     const {
       data: { publicUrl },
     } = supabase.storage.from("flyers").getPublicUrl(filePath);
 
-    const result: MediaUploadResult = {
-      url: publicUrl,
-    };
+    const result: MediaUploadResult = { url: publicUrl };
 
-    // For videos, generate thumbnail
+    // Generate real thumbnail for videos
     if (type === "video") {
-      // Note: Thumbnail generation would require additional processing
-      // For now, we'll use a placeholder or the first frame
-      result.thumbnailUrl = publicUrl; // Placeholder
+      try {
+        const { uri: thumbUri } = await VideoThumbnails.getThumbnailAsync(uri, {
+          time: 1000,
+          quality: 0.6,
+        });
+
+        const thumbBase64 = await FileSystem.readAsStringAsync(thumbUri, {
+          encoding: "base64",
+        });
+
+        const thumbPath = `party-media/${partyId}/thumb_${Date.now()}.jpg`;
+
+        const { error: thumbError } = await supabase.storage
+          .from("flyers")
+          .upload(thumbPath, decode(thumbBase64), {
+            contentType: "image/jpeg",
+            upsert: true,
+          });
+
+        if (!thumbError) {
+          const {
+            data: { publicUrl: thumbPublicUrl },
+          } = supabase.storage.from("flyers").getPublicUrl(thumbPath);
+          result.thumbnailUrl = thumbPublicUrl;
+        }
+      } catch (thumbError) {
+        console.log("Thumbnail generation failed (non-fatal):", thumbError);
+      }
     }
 
     return result;
@@ -71,28 +96,22 @@ export async function uploadPartyMedia(
  * Pick multiple images from device
  */
 export async function pickImages(
-  maxImages: number = 10
+  maxImages: number = 10,
 ): Promise<ImagePicker.ImagePickerAsset[]> {
   try {
-    // Request permission
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
     if (status !== "granted") {
       throw new Error("Permission to access media library was denied");
     }
 
-    // Launch image picker
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsMultipleSelection: true,
-      quality: 0.8,
+      quality: 0.7,
       selectionLimit: maxImages,
     });
 
-    if (result.canceled) {
-      return [];
-    }
-
+    if (result.canceled) return [];
     return result.assets;
   } catch (error) {
     console.error("Image picker error:", error);
@@ -104,28 +123,23 @@ export async function pickImages(
  * Pick a video from device
  */
 export async function pickVideo(
-  maxDuration: number = 120
+  maxDuration: number = 120,
 ): Promise<ImagePicker.ImagePickerAsset | null> {
   try {
-    // Request permission
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
     if (status !== "granted") {
       throw new Error("Permission to access media library was denied");
     }
 
-    // Launch video picker
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Videos,
       allowsMultipleSelection: false,
+      allowsEditing: false, // must be false for videos on iOS
       quality: 0.8,
       videoMaxDuration: maxDuration,
     });
 
-    if (result.canceled) {
-      return null;
-    }
-
+    if (result.canceled) return null;
     return result.assets[0];
   } catch (error) {
     console.error("Video picker error:", error);
@@ -145,7 +159,7 @@ export async function savePartyMedia(
     displayOrder?: number;
     isPrimary?: boolean;
     durationSeconds?: number;
-  }
+  },
 ): Promise<void> {
   try {
     const { error } = await supabase.from("party_media").insert({
@@ -158,9 +172,7 @@ export async function savePartyMedia(
       duration_seconds: options?.durationSeconds,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   } catch (error) {
     console.error("Error saving party media:", error);
     throw error;
@@ -178,10 +190,7 @@ export async function getPartyMedia(partyId: string) {
       .eq("party_id", partyId)
       .order("display_order", { ascending: true });
 
-    if (error) {
-      throw error;
-    }
-
+    if (error) throw error;
     return data || [];
   } catch (error) {
     console.error("Error fetching party media:", error);
@@ -194,35 +203,27 @@ export async function getPartyMedia(partyId: string) {
  */
 export async function deletePartyMedia(mediaId: string): Promise<void> {
   try {
-    // First get the media URL to delete from storage
     const { data: media, error: fetchError } = await supabase
       .from("party_media")
       .select("media_url")
       .eq("id", mediaId)
       .single();
 
-    if (fetchError) {
-      throw fetchError;
-    }
+    if (fetchError) throw fetchError;
 
-    // Extract file path from URL
     const url = new URL(media.media_url);
     const filePath = url.pathname.split("/flyers/")[1];
 
-    // Delete from storage
     if (filePath) {
       await supabase.storage.from("flyers").remove([filePath]);
     }
 
-    // Delete from database
     const { error } = await supabase
       .from("party_media")
       .delete()
       .eq("id", mediaId);
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   } catch (error) {
     console.error("Error deleting party media:", error);
     throw error;
@@ -234,7 +235,7 @@ export async function deletePartyMedia(mediaId: string): Promise<void> {
  */
 export async function updateMediaOrder(
   mediaId: string,
-  newOrder: number
+  newOrder: number,
 ): Promise<void> {
   try {
     const { error } = await supabase
@@ -242,9 +243,7 @@ export async function updateMediaOrder(
       .update({ display_order: newOrder })
       .eq("id", mediaId);
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   } catch (error) {
     console.error("Error updating media order:", error);
     throw error;
@@ -256,24 +255,20 @@ export async function updateMediaOrder(
  */
 export async function setPrimaryMedia(
   partyId: string,
-  mediaId: string
+  mediaId: string,
 ): Promise<void> {
   try {
-    // First, unset all primary flags for this party
     await supabase
       .from("party_media")
       .update({ is_primary: false })
       .eq("party_id", partyId);
 
-    // Then set the new primary
     const { error } = await supabase
       .from("party_media")
       .update({ is_primary: true })
       .eq("id", mediaId);
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   } catch (error) {
     console.error("Error setting primary media:", error);
     throw error;

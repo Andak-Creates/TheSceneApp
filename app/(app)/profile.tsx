@@ -34,7 +34,7 @@ type Tab = "hosted" | "reposts" | "upcoming" | "past";
 export default function ProfileScreen() {
   const router = useRouter();
   const { user, signOut } = useAuthStore();
-  const { profile } = useUserStore();
+  const { profile, fetchProfile } = useUserStore();
   const [hostedParties, setHostedParties] = useState<any[]>([]);
 
   const [stats, setStats] = useState<Stats>({
@@ -55,6 +55,7 @@ export default function ProfileScreen() {
   const [editFullName, setEditFullName] = useState("");
   const [saving, setSaving] = useState(false);
   const [detectingLocation, setDetectingLocation] = useState(false);
+  const [isHostAdmin, setIsHostAdmin] = useState(false);
 
   const fetchHostedParties = async () => {
     if (!user) return;
@@ -85,6 +86,18 @@ export default function ProfileScreen() {
     if (profile?.is_host) {
       fetchHostedParties();
     }
+
+    // Check if user is a host-level admin (even without is_host flag)
+    const checkHostAdmin = async () => {
+      if (!user) return;
+      const { data } = await supabase
+        .from("host_admins")
+        .select("id")
+        .eq("user_id", user.id)
+        .limit(1);
+      setIsHostAdmin(!!data && data.length > 0);
+    };
+    checkHostAdmin();
   }, [user, profile]);
 
   const fetchUserCity = async () => {
@@ -207,12 +220,13 @@ export default function ProfileScreen() {
   };
 
   // ✅ ADD REFRESH HANDLER
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
+    if (!user) return;
     setRefreshing(true);
+    // Fetching the profile will update the userStore,
+    // which triggers the useEffect and subsequent data fetches.
+    await fetchProfile(user.id);
     fetchUserStats();
-    if (profile?.is_host) {
-      fetchHostedParties();
-    }
   };
 
   const handleAvatarChange = async () => {
@@ -229,7 +243,7 @@ export default function ProfileScreen() {
       const result = await ImagePicker.launchImageLibraryAsync({
         allowsEditing: true,
         aspect: [1, 1],
-        quality: 0.8,
+        quality: 0.7,
         base64: true,
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
       });
@@ -639,9 +653,31 @@ export default function ProfileScreen() {
               </View>
               <Ionicons name="chevron-forward" size={20} color="#fff" />
             </TouchableOpacity>
-
-
           </View>
+        )}
+
+        {/* Scanner & Dashboard button for non-host users who are host admins */}
+        {!profile.is_host && isHostAdmin && (
+          <TouchableOpacity
+            onPress={() => router.push({ pathname: "../host-dashboard" })}
+            className="bg-purple-600/90 rounded-2xl p-4 flex-row items-center justify-between shadow-lg shadow-purple-600/20 mt-6"
+            activeOpacity={0.9}
+          >
+            <View className="flex-row items-center">
+              <View className="bg-white/20 p-2.5 rounded-full">
+                <Ionicons name="scan" size={24} color="#fff" />
+              </View>
+              <View className="ml-3.5">
+                <Text className="text-white font-extrabold text-base">
+                  Scanner & Dashboard
+                </Text>
+                <Text className="text-purple-100/80 text-sm mt-0.5">
+                  Scan tickets & track parties
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#fff" />
+          </TouchableOpacity>
         )}
 
         <TouchableOpacity

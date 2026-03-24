@@ -18,7 +18,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { GooglePlacesAutocomplete } from "react-native-google-places-autocomplete";
 import { getUserCurrency } from "../../lib/currency";
 import { uploadPartyMedia } from "../../lib/media";
 import { supabase } from "../../lib/supabase";
@@ -76,7 +75,6 @@ interface MediaItem {
   uploadedUrl?: string;
 }
 
-// Helper for safe number parsing
 const safeParseFloat = (value: string): number => {
   const parsed = parseFloat(value);
   return isNaN(parsed) ? 0 : parsed;
@@ -100,14 +98,37 @@ export default function CreatePartyScreen() {
     null,
   );
   const [loadingProfiles, setLoadingProfiles] = useState(true);
+  const [refreshingProfiles, setRefreshingProfiles] = useState(false);
 
-  // Combined check for verification and host profiles
+  const fetchHostProfiles = async (showRefreshing = false) => {
+    if (!user) return;
+    if (showRefreshing) setRefreshingProfiles(true);
+    try {
+      const { data: profiles, error: profileError } = await supabase
+        .from("host_profiles")
+        .select("*")
+        .eq("owner_id", user.id);
+
+      if (profileError) throw profileError;
+
+      if (profiles && profiles.length > 0) {
+        setHostProfiles(profiles);
+        if (!selectedHostProfile) {
+          setSelectedHostProfile(profiles[0].id);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch host profiles:", err);
+    } finally {
+      setRefreshingProfiles(false);
+    }
+  };
+
   useEffect(() => {
     const checkHostingReady = async () => {
       if (!user) return;
       setLoadingProfiles(true);
       try {
-        // 1. Check Verification Status
         const { data: profileRow } = await supabase
           .from("profiles")
           .select("host_verified_at, host_verification_status, is_host")
@@ -133,7 +154,6 @@ export default function CreatePartyScreen() {
           }
         }
 
-        // 2. Check for Host Profiles (Brands)
         const { data: profiles, error: profileError } = await supabase
           .from("host_profiles")
           .select("*")
@@ -142,7 +162,6 @@ export default function CreatePartyScreen() {
         if (profileError) throw profileError;
 
         if (!profiles || profiles.length === 0) {
-          // No brand profiles found - redirect to setup
           Alert.alert(
             "Final Step",
             "You're verified! Now, create a host brand (profile) to publish your parties.",
@@ -170,7 +189,6 @@ export default function CreatePartyScreen() {
     checkHostingReady();
   }, [user?.id]);
 
-  // Reset form on mount
   useEffect(() => {
     if (verificationChecked) resetForm();
   }, [verificationChecked]);
@@ -189,6 +207,8 @@ export default function CreatePartyScreen() {
     setEndTime("");
     setLocation("");
     setCity("");
+    setState("");
+    setCountry("");
     setShowStartDatePicker(false);
     setShowStartTimePicker(false);
     setShowEndDatePicker(false);
@@ -201,22 +221,17 @@ export default function CreatePartyScreen() {
       { id: "1", name: "General Admission", price: "", quantity: "" },
     ]);
 
-    // Fetch and set user's preferred currency
     let prefCurr = "NGN";
     if (user?.id) {
       prefCurr = await getUserCurrency(user.id);
-      setCurrency(prefCurr);
-    } else {
-      setCurrency("NGN");
     }
-
     setCurrency(prefCurr);
     setSelectedHostProfile(hostProfiles.length > 0 ? hostProfiles[0].id : null);
     setError("");
   };
 
   // Step 1: Visuals
-  const [flyerImage, setFlyerImage] = useState<string | null>(null); // Kept for backward compatibility display
+  const [flyerImage, setFlyerImage] = useState<string | null>(null);
   const [flyerBase64, setFlyerBase64] = useState<string | null>(null);
   const [mediaGallery, setMediaGallery] = useState<MediaItem[]>([]);
 
@@ -229,6 +244,8 @@ export default function CreatePartyScreen() {
   const [endTime, setEndTime] = useState("");
   const [location, setLocation] = useState("");
   const [city, setCity] = useState("");
+  const [state, setState] = useState("");
+  const [country, setCountry] = useState("");
   const [showStartDatePicker, setShowStartDatePicker] = useState(false);
   const [showStartTimePicker, setShowStartTimePicker] = useState(false);
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
@@ -241,10 +258,8 @@ export default function CreatePartyScreen() {
   const [locationTBA, setLocationTBA] = useState(false);
   const [priceTBA, setPriceTBA] = useState(false);
 
-  // New optional fields
   const [dressCode, setDressCode] = useState("");
 
-  // Date helpers
   const formatDate = (date: Date) => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -269,7 +284,6 @@ export default function CreatePartyScreen() {
     { id: "1", name: "General Admission", price: "", quantity: "" },
   ]);
   const [currency, setCurrency] = useState("NGN");
-
   const [error, setError] = useState("");
 
   const toggleGenre = (genre: string) => {
@@ -317,10 +331,11 @@ export default function CreatePartyScreen() {
         break;
       case 2:
         if (!title.trim()) return "Please enter a party title";
+        if (!country.trim()) return "Please enter the country";
+        if (!state.trim()) return "Please enter the state";
+        if (!city.trim()) return "Please enter the city";
         if (!locationTBA && !location.trim())
-          return "Please enter the location or mark as TBA";
-        if (!locationTBA && !city.trim())
-          return "Please enter the city or mark as TBA";
+          return "Please enter the venue or mark location as TBA";
         if (!selectedHostProfile)
           return "Please select a host profile or create one first";
         if (!dateTBA) {
@@ -343,7 +358,6 @@ export default function CreatePartyScreen() {
           for (const tier of ticketTiers) {
             if (!tier.name.trim())
               return "Please fill in all ticket tier names";
-            // Check if price is a valid number string
             if (!tier.price.trim() || isNaN(parseFloat(tier.price)))
               return "Please fill in all ticket prices or mark as TBA";
             if (!tier.quantity.trim() || parseInt(tier.quantity) <= 0)
@@ -372,8 +386,6 @@ export default function CreatePartyScreen() {
 
   const handlePublish = async () => {
     if (!user) return;
-
-    // Final check logic
     if (mediaGallery.length === 0) {
       setError("Please upload at least one image");
       return;
@@ -383,19 +395,13 @@ export default function CreatePartyScreen() {
     setError("");
 
     try {
-      // 1. Upload All Media to Supabase Storage
       const uploadedMedia = [];
-      const tempId = Date.now().toString(); // Temporary ID for folder structure
 
       for (const item of mediaGallery) {
         try {
           const result = await uploadPartyMedia(user.id, item.uri, item.type);
-          uploadedMedia.push({
-            ...item,
-            uploadedUrl: result.url,
-          });
+          uploadedMedia.push({ ...item, uploadedUrl: result.url });
         } catch (uploadError) {
-          console.error("Error uploading media item:", uploadError);
           throw new Error(
             "Failed to upload some media files. Please try again.",
           );
@@ -406,33 +412,23 @@ export default function CreatePartyScreen() {
         uploadedMedia.find((m) => m.isPrimary) || uploadedMedia[0];
       const primaryUrl = primaryMedia?.uploadedUrl || "";
 
-      // 2. Parse date and time
       let partyDateTimeISO = null;
       let partyEndDateTimeISO = null;
 
       if (!dateTBA) {
-        const dateTimeString = `${startDate}T${startTime}:00`;
-        const partyDateTime = new Date(dateTimeString);
-
-        if (isNaN(partyDateTime.getTime())) {
+        const partyDateTime = new Date(`${startDate}T${startTime}:00`);
+        if (isNaN(partyDateTime.getTime()))
           throw new Error("Invalid start date or time");
-        }
         partyDateTimeISO = partyDateTime.toISOString();
 
-        const endDateTimeString = `${endDate}T${endTime}:00`;
-        const partyEndDateTime = new Date(endDateTimeString);
-
-        if (isNaN(partyEndDateTime.getTime())) {
+        const partyEndDateTime = new Date(`${endDate}T${endTime}:00`);
+        if (isNaN(partyEndDateTime.getTime()))
           throw new Error("Invalid end date or time");
-        }
-        if (partyEndDateTime <= partyDateTime) {
+        if (partyEndDateTime <= partyDateTime)
           throw new Error("End time must be after start time");
-        }
         partyEndDateTimeISO = partyEndDateTime.toISOString();
       }
 
-      // 3. Calculate totals from tiers
-      // Handle TBA gracefully
       let lowestPrice: number | null = null;
       let totalQuantity = 0;
 
@@ -444,14 +440,8 @@ export default function CreatePartyScreen() {
           (sum, t) => sum + safeParseInt(t.quantity),
           0,
         );
-      } else {
-        // If Price is TBA, we can set ticket_price to NULL (if schema allows) or 0.
-        // The schema migration said: `ALTER COLUMN ticket_price DROP NOT NULL;`
-        // So we can send NULL.
-        lowestPrice = null;
       }
 
-      // 4. Create party
       const { data: party, error: partyError } = await supabase
         .from("parties")
         .insert({
@@ -463,16 +453,14 @@ export default function CreatePartyScreen() {
           end_date: partyEndDateTimeISO,
           date_tba: dateTBA,
           location: locationTBA ? null : location.trim(),
-          city: locationTBA ? null : city.trim(),
+          city: city.trim(), // always saved
+          state: state.trim(), // always saved
+          country: country.trim(), // always saved
           location_tba: locationTBA,
-          ticket_price: lowestPrice, // Can be null
+          ticket_price: lowestPrice,
           ticket_price_tba: priceTBA,
           currency_code: currency,
-
-          // Additional fields
           dress_code: dressCode.trim() || null,
-
-          // Legacy/Computed
           ticket_quantity: totalQuantity,
           tickets_sold: 0,
           music_genres: selectedGenres,
@@ -485,7 +473,14 @@ export default function CreatePartyScreen() {
 
       if (partyError) throw partyError;
 
-      // 5. Insert Media mapping records
+      supabase.functions
+        .invoke("send-new-party-notification", {
+          body: { party_id: party.id },
+        })
+        .catch((err) =>
+          console.log("Notification send failed (non-fatal):", err),
+        );
+
       if (uploadedMedia.length > 0) {
         const mediaToInsert = uploadedMedia.map((item, index) => ({
           party_id: party.id,
@@ -494,16 +489,13 @@ export default function CreatePartyScreen() {
           is_primary: item.isPrimary,
           display_order: index,
         }));
-
         const { error: mediaError } = await supabase
           .from("party_media")
           .insert(mediaToInsert);
-
         if (mediaError)
           console.error("Media insert error (non-fatal):", mediaError);
       }
 
-      // 6. Create Ticket Tiers
       if (!priceTBA && ticketTiers.length > 0) {
         const tiersToInsert = ticketTiers.map((tier, index) => ({
           party_id: party.id,
@@ -516,11 +508,9 @@ export default function CreatePartyScreen() {
           is_active: true,
           currency_code: currency,
         }));
-
         const { error: tiersError } = await supabase
           .from("ticket_tiers")
           .insert(tiersToInsert);
-
         if (tiersError) throw tiersError;
       }
 
@@ -547,42 +537,27 @@ export default function CreatePartyScreen() {
       className="flex-1 bg-[#09030e]"
       keyboardVerticalOffset={Platform.OS === "ios" ? 10 : 0}
     >
-      {/* 🔒 FIXED HEADER */}
+      {/* FIXED HEADER */}
       <View className="pt-16 px-6 pb-2 bg-[#09030e] z-10 border-b border-white/5">
         <View className="flex-row items-center justify-between">
           <TouchableOpacity
-            onPress={() => {
-              if (currentStep === 1) {
-                router.back();
-              } else {
-                handleBack();
-              }
-            }}
+            onPress={() => (currentStep === 1 ? router.back() : handleBack())}
             className="w-10 h-10 bg-white/5 rounded-full items-center justify-center border border-white/10"
           >
             <Ionicons name="arrow-back" size={20} color="#fff" />
           </TouchableOpacity>
-
           <Text className="text-white text-lg font-extrabold tracking-wide">
             Create Party
           </Text>
-
           <View style={{ width: 40 }} />
         </View>
 
-        {/* Step Indicator */}
         <View className="mt-6 mb-2">
           <View className="flex-row justify-between items-center">
             {STEPS.map((step) => (
               <View key={step.id} className="flex-1 items-center mx-1">
                 <View
-                  className={`w-full h-1.5 rounded-full ${
-                    currentStep > step.id
-                      ? "bg-[#a855f7]"
-                      : currentStep === step.id
-                        ? "bg-[#a855f7]"
-                        : "bg-white/10"
-                  }`}
+                  className={`w-full h-1.5 rounded-full ${currentStep >= step.id ? "bg-[#a855f7]" : "bg-white/10"}`}
                 />
               </View>
             ))}
@@ -607,7 +582,7 @@ export default function CreatePartyScreen() {
 
           {/* Step 1: Visuals */}
           {currentStep === 1 && (
-            <View className="animate-fade-in">
+            <View>
               <View className="mb-8">
                 <Text className="text-purple-400 text-sm font-bold uppercase tracking-widest mb-2">
                   Step 1
@@ -620,7 +595,6 @@ export default function CreatePartyScreen() {
                   be the cover.
                 </Text>
               </View>
-
               <MediaGalleryUploader
                 onMediaChange={setMediaGallery}
                 maxImages={10}
@@ -631,7 +605,7 @@ export default function CreatePartyScreen() {
 
           {/* Step 2: Basics */}
           {currentStep === 2 && (
-            <View className="animate-fade-in">
+            <View>
               <View className="mb-8">
                 <Text className="text-purple-400 text-sm font-bold uppercase tracking-widest mb-2">
                   Step 2
@@ -644,23 +618,27 @@ export default function CreatePartyScreen() {
                 </Text>
               </View>
 
+              {/* Host Profile */}
               <View className="mb-4">
-                <Text className="text-white text-sm font-semibold mb-2">
-                  Party Name *
-                </Text>
-                <TextInput
-                  className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white"
-                  placeholder="e.g., Afrobeat Night Out"
-                  placeholderTextColor="#666"
-                  value={title}
-                  onChangeText={setTitle}
-                />
-              </View>
-
-              <View className="mb-4">
-                <Text className="text-white text-sm font-semibold mb-2">
-                  Host Profile *
-                </Text>
+                <View className="flex-row items-center justify-between mb-2">
+                  <Text className="text-white text-sm font-semibold">
+                    Host Profile *
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => fetchHostProfiles(true)}
+                    className="flex-row items-center gap-1 bg-white/5 px-3 py-1.5 rounded-full border border-white/10"
+                    disabled={refreshingProfiles}
+                  >
+                    {refreshingProfiles ? (
+                      <ActivityIndicator size={12} color="#a855f7" />
+                    ) : (
+                      <Ionicons name="refresh" size={14} color="#a855f7" />
+                    )}
+                    <Text className="text-purple-400 text-xs font-semibold ml-1">
+                      Refresh
+                    </Text>
+                  </TouchableOpacity>
+                </View>
                 {loadingProfiles ? (
                   <ActivityIndicator size="small" color="#a855f7" />
                 ) : hostProfiles.length > 0 ? (
@@ -669,11 +647,7 @@ export default function CreatePartyScreen() {
                       <TouchableOpacity
                         key={hp.id}
                         onPress={() => setSelectedHostProfile(hp.id)}
-                        className={`px-4 py-2 rounded-xl border ${
-                          selectedHostProfile === hp.id
-                            ? "bg-purple-600 border-purple-500"
-                            : "bg-white/5 border-white/10"
-                        }`}
+                        className={`px-4 py-2 rounded-xl border ${selectedHostProfile === hp.id ? "bg-purple-600 border-purple-500" : "bg-white/5 border-white/10"}`}
                       >
                         <Text className="text-white font-medium">
                           {hp.name}
@@ -690,21 +664,42 @@ export default function CreatePartyScreen() {
                     </TouchableOpacity>
                   </View>
                 ) : (
-                  <TouchableOpacity
-                    onPress={() => router.push("/(app)/host-profile-setup")}
-                    className="bg-purple-600/20 border border-dashed border-purple-500/50 rounded-xl p-4 items-center"
-                  >
-                    <Ionicons name="add-circle" size={24} color="#a855f7" />
-                    <Text className="text-purple-400 font-bold mt-2">
-                      Create Host Profile
+                  <View>
+                    <TouchableOpacity
+                      onPress={() => router.push("/(app)/host-profile-setup")}
+                      className="bg-purple-600/20 border border-dashed border-purple-500/50 rounded-xl p-4 items-center mb-3"
+                    >
+                      <Ionicons name="add-circle" size={24} color="#a855f7" />
+                      <Text className="text-purple-400 font-bold mt-2">
+                        Create Host Profile
+                      </Text>
+                      <Text className="text-gray-400 text-xs text-center mt-1">
+                        You need a host profile to publish parties
+                      </Text>
+                    </TouchableOpacity>
+                    <Text className="text-gray-500 text-xs text-center">
+                      Already created one? Tap{" "}
+                      <Text className="text-purple-400">Refresh</Text> above
                     </Text>
-                    <Text className="text-gray-400 text-xs text-center mt-1">
-                      You need a host profile to publish parties
-                    </Text>
-                  </TouchableOpacity>
+                  </View>
                 )}
               </View>
 
+              {/* Party Name */}
+              <View className="mb-4">
+                <Text className="text-white text-sm font-semibold mb-2">
+                  Party Name *
+                </Text>
+                <TextInput
+                  className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white"
+                  placeholder="e.g., Afrobeat Night Out"
+                  placeholderTextColor="#666"
+                  value={title}
+                  onChangeText={setTitle}
+                />
+              </View>
+
+              {/* Description */}
               <View className="mb-4">
                 <Text className="text-white text-sm font-semibold mb-2">
                   Description (Optional)
@@ -726,14 +721,12 @@ export default function CreatePartyScreen() {
                 <Text className="text-white text-sm font-semibold mb-3">
                   Start Date & Time
                 </Text>
-
                 <TBAToggle
                   label="Date & Time TBA"
                   value={dateTBA}
                   onChange={setDateTBA}
                   description="Mark if you haven't finalized the date yet"
                 />
-
                 {!dateTBA && (
                   <View className="flex-row gap-3 mb-3 mt-3">
                     <TouchableOpacity
@@ -751,7 +744,6 @@ export default function CreatePartyScreen() {
                         color="#666"
                       />
                     </TouchableOpacity>
-
                     <TouchableOpacity
                       onPress={() => setShowStartTimePicker(true)}
                       className="flex-1 bg-white/10 border border-white/20 rounded-xl px-4 py-3 flex-row items-center justify-between"
@@ -766,102 +758,132 @@ export default function CreatePartyScreen() {
                   </View>
                 )}
 
-                {/* Date Pickers */}
                 {showStartDatePicker && (
-                  <Modal
-                    transparent
-                    animationType="fade"
-                    visible={showStartDatePicker}
-                  >
-                    <View className="flex-1 justify-center bg-black/80 px-4">
-                      <View className="bg-[#191022] rounded-3xl overflow-hidden">
-                        <View className="flex-row justify-between items-center p-4 border-b border-white/10 bg-[#251833]">
-                          <TouchableOpacity
-                            onPress={() => setShowStartDatePicker(false)}
-                          >
-                            <Text className="text-gray-400 font-semibold">
-                              Cancel
+                  Platform.OS === "ios" ? (
+                    <Modal
+                      transparent
+                      animationType="fade"
+                      visible={showStartDatePicker}
+                    >
+                      <View className="flex-1 justify-center bg-black/80 px-4">
+                        <View className="bg-[#191022] rounded-3xl overflow-hidden">
+                          <View className="flex-row justify-between items-center p-4 border-b border-white/10 bg-[#251833]">
+                            <TouchableOpacity
+                              onPress={() => setShowStartDatePicker(false)}
+                            >
+                              <Text className="text-gray-400 font-semibold">
+                                Cancel
+                              </Text>
+                            </TouchableOpacity>
+                            <Text className="text-white font-bold">
+                              Select Date
                             </Text>
-                          </TouchableOpacity>
-                          <Text className="text-white font-bold">
-                            Select Date
-                          </Text>
-                          <TouchableOpacity
-                            onPress={() => setShowStartDatePicker(false)}
-                          >
-                            <Text className="text-purple-500 font-bold">
-                              Done
-                            </Text>
-                          </TouchableOpacity>
-                        </View>
-                        <View className="p-4 items-center">
-                          <DateTimePicker
-                            value={startDateTime}
-                            mode="date"
-                            display="spinner"
-                            onChange={(event, date) => {
-                              if (date) {
-                                setStartDateTime(date);
-                                setStartDate(formatDate(date));
-                              }
-                            }}
-                            minimumDate={new Date()}
-                            textColor="#fff"
-                          />
+                            <TouchableOpacity
+                              onPress={() => setShowStartDatePicker(false)}
+                            >
+                              <Text className="text-purple-500 font-bold">
+                                Done
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                          <View className="p-4 items-center">
+                            <DateTimePicker
+                              value={startDateTime}
+                              mode="date"
+                              display="spinner"
+                              onChange={(event, date) => {
+                                if (date) {
+                                  setStartDateTime(date);
+                                  setStartDate(formatDate(date));
+                                }
+                              }}
+                              minimumDate={new Date()}
+                              textColor="#fff"
+                            />
+                          </View>
                         </View>
                       </View>
-                    </View>
-                  </Modal>
+                    </Modal>
+                  ) : (
+                    <DateTimePicker
+                      value={startDateTime}
+                      mode="date"
+                      display="default"
+                      onChange={(event, date) => {
+                        setShowStartDatePicker(false);
+                        if (event.type === "set" && date) {
+                          setStartDateTime(date);
+                          setStartDate(formatDate(date));
+                        }
+                      }}
+                      minimumDate={new Date()}
+                    />
+                  )
                 )}
 
                 {showStartTimePicker && (
-                  <Modal
-                    transparent
-                    animationType="fade"
-                    visible={showStartTimePicker}
-                  >
-                    <View className="flex-1 justify-center bg-black/80 px-4">
-                      <View className="bg-[#191022] rounded-3xl overflow-hidden">
-                        <View className="flex-row justify-between items-center p-4 border-b border-white/10 bg-[#251833]">
-                          <TouchableOpacity
-                            onPress={() => setShowStartTimePicker(false)}
-                          >
-                            <Text className="text-gray-400 font-semibold">
-                              Cancel
+                  Platform.OS === "ios" ? (
+                    <Modal
+                      transparent
+                      animationType="fade"
+                      visible={showStartTimePicker}
+                    >
+                      <View className="flex-1 justify-center bg-black/80 px-4">
+                        <View className="bg-[#191022] rounded-3xl overflow-hidden">
+                          <View className="flex-row justify-between items-center p-4 border-b border-white/10 bg-[#251833]">
+                            <TouchableOpacity
+                              onPress={() => setShowStartTimePicker(false)}
+                            >
+                              <Text className="text-gray-400 font-semibold">
+                                Cancel
+                              </Text>
+                            </TouchableOpacity>
+                            <Text className="text-white font-bold">
+                              Select Time
                             </Text>
-                          </TouchableOpacity>
-                          <Text className="text-white font-bold">
-                            Select Time
-                          </Text>
-                          <TouchableOpacity
-                            onPress={() => setShowStartTimePicker(false)}
-                          >
-                            <Text className="text-purple-500 font-bold">
-                              Done
-                            </Text>
-                          </TouchableOpacity>
-                        </View>
-                        <View className="p-4 items-center">
-                          <DateTimePicker
-                            value={startDateTime}
-                            mode="time"
-                            display="spinner"
-                            onChange={(event, time) => {
-                              if (time) {
-                                setStartDateTime(time);
-                                setStartTime(time.toTimeString().slice(0, 5));
-                              }
-                            }}
-                            textColor="#fff"
-                          />
+                            <TouchableOpacity
+                              onPress={() => setShowStartTimePicker(false)}
+                            >
+                              <Text className="text-purple-500 font-bold">
+                                Done
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                          <View className="p-4 items-center">
+                            <DateTimePicker
+                              value={startDateTime}
+                              mode="time"
+                              display="spinner"
+                              onChange={(event, time) => {
+                                if (time) {
+                                  setStartDateTime(time);
+                                  setStartTime(time.toTimeString().slice(0, 5));
+                                }
+                              }}
+                              textColor="#fff"
+                            />
+                          </View>
                         </View>
                       </View>
-                    </View>
-                  </Modal>
+                    </Modal>
+                  ) : (
+                    <DateTimePicker
+                      value={startDateTime}
+                      mode="time"
+                      display="default"
+                      onChange={(event, time) => {
+                        setShowStartTimePicker(false);
+                        if (event.type === "set" && time) {
+                          setStartDateTime(time);
+                          setStartTime(time.toTimeString().slice(0, 5));
+                        }
+                      }}
+                    />
+                  )
                 )}
               </View>
 
-              {/* End Date & Time (Optional) */}
+              {/* End Date & Time */}
               {!dateTBA && (
                 <View className="mb-4">
                   <Text className="text-white text-sm font-semibold mb-2">
@@ -883,7 +905,6 @@ export default function CreatePartyScreen() {
                         color="#666"
                       />
                     </TouchableOpacity>
-
                     <TouchableOpacity
                       onPress={() => setShowEndTimePicker(true)}
                       className="flex-1 bg-white/10 border border-white/20 rounded-xl px-4 py-3 flex-row items-center justify-between"
@@ -898,171 +919,210 @@ export default function CreatePartyScreen() {
                   </View>
 
                   {showEndDatePicker && (
-                    <Modal
-                      transparent
-                      animationType="fade"
-                      visible={showEndDatePicker}
-                    >
-                      <View className="flex-1 justify-center bg-black/80 px-4">
-                        <View className="bg-[#191022] rounded-3xl overflow-hidden">
-                          <View className="flex-row justify-between items-center p-4 border-b border-white/10 bg-[#251833]">
-                            <TouchableOpacity
-                              onPress={() => setShowEndDatePicker(false)}
-                            >
-                              <Text className="text-gray-400 font-semibold">
-                                Cancel
+                    Platform.OS === "ios" ? (
+                      <Modal
+                        transparent
+                        animationType="fade"
+                        visible={showEndDatePicker}
+                      >
+                        <View className="flex-1 justify-center bg-black/80 px-4">
+                          <View className="bg-[#191022] rounded-3xl overflow-hidden">
+                            <View className="flex-row justify-between items-center p-4 border-b border-white/10 bg-[#251833]">
+                              <TouchableOpacity
+                                onPress={() => setShowEndDatePicker(false)}
+                              >
+                                <Text className="text-gray-400 font-semibold">
+                                  Cancel
+                                </Text>
+                              </TouchableOpacity>
+                              <Text className="text-white font-bold">
+                                End Date
                               </Text>
-                            </TouchableOpacity>
-                            <Text className="text-white font-bold">
-                              End Date
-                            </Text>
-                            <TouchableOpacity
-                              onPress={() => setShowEndDatePicker(false)}
-                            >
-                              <Text className="text-purple-500 font-bold">
-                                Done
-                              </Text>
-                            </TouchableOpacity>
-                          </View>
-                          <View className="p-4 items-center">
-                            <DateTimePicker
-                              value={endDateTime}
-                              mode="date"
-                              display="spinner"
-                              onChange={(event, date) => {
-                                if (date) {
-                                  setEndDateTime(date);
-                                  setEndDate(formatDate(date));
-                                }
-                              }}
-                              minimumDate={startDateTime}
-                              textColor="#fff"
-                            />
+                              <TouchableOpacity
+                                onPress={() => setShowEndDatePicker(false)}
+                              >
+                                <Text className="text-purple-500 font-bold">
+                                  Done
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
+                            <View className="p-4 items-center">
+                              <DateTimePicker
+                                value={endDateTime}
+                                mode="date"
+                                display="spinner"
+                                onChange={(event, date) => {
+                                  if (date) {
+                                    setEndDateTime(date);
+                                    setEndDate(formatDate(date));
+                                  }
+                                }}
+                                minimumDate={startDateTime}
+                                textColor="#fff"
+                              />
+                            </View>
                           </View>
                         </View>
-                      </View>
-                    </Modal>
+                      </Modal>
+                    ) : (
+                      <DateTimePicker
+                        value={endDateTime}
+                        mode="date"
+                        display="default"
+                        onChange={(event, date) => {
+                          setShowEndDatePicker(false);
+                          if (event.type === "set" && date) {
+                            setEndDateTime(date);
+                            setEndDate(formatDate(date));
+                          }
+                        }}
+                        minimumDate={startDateTime}
+                      />
+                    )
                   )}
 
                   {showEndTimePicker && (
-                    <Modal
-                      transparent
-                      animationType="fade"
-                      visible={showEndTimePicker}
-                    >
-                      <View className="flex-1 justify-center bg-black/80 px-4">
-                        <View className="bg-[#191022] rounded-3xl overflow-hidden">
-                          <View className="flex-row justify-between items-center p-4 border-b border-white/10 bg-[#251833]">
-                            <TouchableOpacity
-                              onPress={() => setShowEndTimePicker(false)}
-                            >
-                              <Text className="text-gray-400 font-semibold">
-                                Cancel
+                    Platform.OS === "ios" ? (
+                      <Modal
+                        transparent
+                        animationType="fade"
+                        visible={showEndTimePicker}
+                      >
+                        <View className="flex-1 justify-center bg-black/80 px-4">
+                          <View className="bg-[#191022] rounded-3xl overflow-hidden">
+                            <View className="flex-row justify-between items-center p-4 border-b border-white/10 bg-[#251833]">
+                              <TouchableOpacity
+                                onPress={() => setShowEndTimePicker(false)}
+                              >
+                                <Text className="text-gray-400 font-semibold">
+                                  Cancel
+                                </Text>
+                              </TouchableOpacity>
+                              <Text className="text-white font-bold">
+                                End Time
                               </Text>
-                            </TouchableOpacity>
-                            <Text className="text-white font-bold">
-                              End Time
-                            </Text>
-                            <TouchableOpacity
-                              onPress={() => setShowEndTimePicker(false)}
-                            >
-                              <Text className="text-purple-500 font-bold">
-                                Done
-                              </Text>
-                            </TouchableOpacity>
-                          </View>
-                          <View className="p-4 items-center">
-                            <DateTimePicker
-                              value={endDateTime}
-                              mode="time"
-                              display="spinner"
-                              onChange={(event, time) => {
-                                if (time) {
-                                  setEndDateTime(time);
-                                  setEndTime(time.toTimeString().slice(0, 5));
-                                }
-                              }}
-                              textColor="#fff"
-                            />
+                              <TouchableOpacity
+                                onPress={() => setShowEndTimePicker(false)}
+                              >
+                                <Text className="text-purple-500 font-bold">
+                                  Done
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
+                            <View className="p-4 items-center">
+                              <DateTimePicker
+                                value={endDateTime}
+                                mode="time"
+                                display="spinner"
+                                onChange={(event, time) => {
+                                  if (time) {
+                                    setEndDateTime(time);
+                                    setEndTime(time.toTimeString().slice(0, 5));
+                                  }
+                                }}
+                                textColor="#fff"
+                              />
+                            </View>
                           </View>
                         </View>
-                      </View>
-                    </Modal>
+                      </Modal>
+                    ) : (
+                      <DateTimePicker
+                        value={endDateTime}
+                        mode="time"
+                        display="default"
+                        onChange={(event, time) => {
+                          setShowEndTimePicker(false);
+                          if (event.type === "set" && time) {
+                            setEndDateTime(time);
+                            setEndTime(time.toTimeString().slice(0, 5));
+                          }
+                        }}
+                      />
+                    )
                   )}
                 </View>
               )}
 
+              {/* Location Fields */}
               <View className="mb-4">
                 <Text className="text-white text-sm font-semibold mb-3">
                   Location
                 </Text>
 
-                <TBAToggle
-                  label="Location TBA"
-                  value={locationTBA}
-                  onChange={setLocationTBA}
-                  description="Mark if venue is still being confirmed"
-                />
+                {/* Country — always required */}
+                <View className="mb-3">
+                  <Text className="text-gray-400 text-xs font-semibold mb-1.5 ml-1">
+                    Country *
+                  </Text>
+                  <TextInput
+                    className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white"
+                    placeholder="e.g., Nigeria"
+                    placeholderTextColor="#666"
+                    value={country}
+                    onChangeText={setCountry}
+                    autoCapitalize="words"
+                  />
+                </View>
 
-                {!locationTBA && (
-                  <View className="mt-3 z-50">
-                    <GooglePlacesAutocomplete
-                      placeholder="e.g., The Shrine, Ikeja"
-                      onPress={(data, details = null) => {
-                        setLocation(data.description);
-                        // Extract city from details if available
-                        if (details) {
-                          const cityComp = details.address_components.find(
-                            (c) =>
-                              c.types.includes("locality") ||
-                              c.types.includes("administrative_area_level_2"),
-                          );
-                          if (cityComp) setCity(cityComp.long_name);
-                        }
-                      }}
-                      query={{
-                        key: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
-                        language: "en",
-                        types: "geocode",
-                      }}
-                      fetchDetails={true}
-                      textInputProps={{
-                        placeholderTextColor: "#666",
-                        className:
-                          "bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-black mb-3",
-                        value: location,
-                        onChangeText: setLocation,
-                      }}
-                      styles={{
-                        container: { flex: 0 },
-                        listView: {
-                          backgroundColor: "#191022",
-                          borderWidth: 1,
-                          borderColor: "rgba(255,255,255,0.1)",
-                          borderRadius: 8,
-                          position: "absolute",
-                          top: 55,
-                        },
-                        description: { color: "#fff" },
-                        row: { backgroundColor: "transparent", padding: 13 },
-                      }}
-                    />
+                {/* State — always required */}
+                <View className="mb-3">
+                  <Text className="text-gray-400 text-xs font-semibold mb-1.5 ml-1">
+                    State / Region *
+                  </Text>
+                  <TextInput
+                    className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white"
+                    placeholder="e.g., Lagos"
+                    placeholderTextColor="#666"
+                    value={state}
+                    onChangeText={setState}
+                    autoCapitalize="words"
+                  />
+                </View>
+
+                {/* City — always required */}
+                <View className="mb-3">
+                  <Text className="text-gray-400 text-xs font-semibold mb-1.5 ml-1">
+                    City / Town *
+                  </Text>
+                  <TextInput
+                    className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white"
+                    placeholder="e.g., Ikeja"
+                    placeholderTextColor="#666"
+                    value={city}
+                    onChangeText={setCity}
+                    autoCapitalize="words"
+                  />
+                </View>
+
+                {/* Venue — optional if TBA */}
+                <View className="mb-2">
+                  <Text className="text-gray-400 text-xs font-semibold mb-1.5 ml-1">
+                    Venue {locationTBA ? "(Optional — TBA)" : "*"}
+                  </Text>
+                  <TBAToggle
+                    label="Venue TBA"
+                    value={locationTBA}
+                    onChange={setLocationTBA}
+                    description="Mark if venue is still being confirmed"
+                  />
+                  {!locationTBA && (
                     <TextInput
-                      className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white"
-                      placeholder="City (e.g., Lagos)"
+                      className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white mt-3"
+                      placeholder="e.g., The Shrine, Ikeja"
                       placeholderTextColor="#666"
-                      value={city}
-                      onChangeText={setCity}
+                      value={location}
+                      onChangeText={setLocation}
                     />
-                  </View>
-                )}
+                  )}
+                </View>
               </View>
             </View>
           )}
 
           {/* Step 3: Vibes */}
           {currentStep === 3 && (
-            <View className="animate-fade-in mb-6">
+            <View className="mb-6">
               <View className="mb-8">
                 <Text className="text-purple-400 text-sm font-bold uppercase tracking-widest mb-2">
                   Step 3
@@ -1084,22 +1144,7 @@ export default function CreatePartyScreen() {
                     <TouchableOpacity
                       key={genre}
                       onPress={() => toggleGenre(genre)}
-                      className={`px-5 py-2.5 rounded-full border ${
-                        selectedGenres.includes(genre)
-                          ? "bg-purple-600 border-purple-500"
-                          : "bg-[#150d1e] border-white/10"
-                      }`}
-                      style={
-                        selectedGenres.includes(genre)
-                          ? {
-                              shadowColor: "#9333ea",
-                              shadowOffset: { width: 0, height: 4 },
-                              shadowOpacity: 0.3,
-                              shadowRadius: 8,
-                              elevation: 8,
-                            }
-                          : undefined
-                      }
+                      className={`px-5 py-2.5 rounded-full border ${selectedGenres.includes(genre) ? "bg-purple-600 border-purple-500" : "bg-[#150d1e] border-white/10"}`}
                       activeOpacity={0.8}
                     >
                       <Text
@@ -1125,22 +1170,7 @@ export default function CreatePartyScreen() {
                     <TouchableOpacity
                       key={vibe}
                       onPress={() => toggleVibe(vibe)}
-                      className={`px-5 py-2.5 rounded-full border ${
-                        selectedVibes.includes(vibe)
-                          ? "bg-purple-600 border-purple-500"
-                          : "bg-[#150d1e] border-white/10"
-                      }`}
-                      style={
-                        selectedVibes.includes(vibe)
-                          ? {
-                              shadowColor: "#9333ea",
-                              shadowOffset: { width: 0, height: 4 },
-                              shadowOpacity: 0.3,
-                              shadowRadius: 8,
-                              elevation: 8,
-                            }
-                          : undefined
-                      }
+                      className={`px-5 py-2.5 rounded-full border ${selectedVibes.includes(vibe) ? "bg-purple-600 border-purple-500" : "bg-[#150d1e] border-white/10"}`}
                       activeOpacity={0.8}
                     >
                       <Text
@@ -1161,7 +1191,7 @@ export default function CreatePartyScreen() {
 
           {/* Step 4: Tickets */}
           {currentStep === 4 && (
-            <View className="animate-fade-in">
+            <View>
               <View className="mb-8">
                 <Text className="text-purple-400 text-sm font-bold uppercase tracking-widest mb-2">
                   Step 4
@@ -1196,7 +1226,7 @@ export default function CreatePartyScreen() {
                 ticketTiers.map((tier, index) => (
                   <View
                     key={tier.id}
-                    className="bg-[#150d1e] border border-white/5 rounded-3xl p-5 mb-4 shadow-xl shadow-black/20"
+                    className="bg-[#150d1e] border border-white/5 rounded-3xl p-5 mb-4"
                   >
                     <View className="flex-row justify-between items-center mb-4 pb-2 border-b border-white/5">
                       <Text className="text-white font-bold text-lg">
@@ -1211,7 +1241,6 @@ export default function CreatePartyScreen() {
                         </TouchableOpacity>
                       )}
                     </View>
-
                     <TextInput
                       className="bg-[#09030e] border border-white/5 rounded-2xl px-5 py-4 text-white mb-4"
                       placeholder="Tier name (e.g., VIP, General)"
@@ -1221,7 +1250,6 @@ export default function CreatePartyScreen() {
                         updateTicketTier(tier.id, "name", val)
                       }
                     />
-
                     <View className="flex-row gap-4">
                       <TextInput
                         className="flex-1 bg-[#09030e] border border-white/5 rounded-2xl px-5 py-4 text-white"
@@ -1250,7 +1278,6 @@ export default function CreatePartyScreen() {
               {!priceTBA && (
                 <TouchableOpacity
                   onPress={addTicketTier}
-                  activeOpacity={0.8}
                   className="flex-row items-center justify-center bg-[#150d1e] border border-purple-500/20 rounded-2xl py-4 mt-2"
                 >
                   <Ionicons name="add-circle" size={22} color="#a855f7" />
@@ -1264,7 +1291,7 @@ export default function CreatePartyScreen() {
 
           {/* Step 5: Preview */}
           {currentStep === 5 && (
-            <View className="animate-fade-in mb-6">
+            <View className="mb-6">
               <View className="mb-8">
                 <Text className="text-purple-400 text-sm font-bold uppercase tracking-widest mb-2">
                   Step 5
@@ -1277,7 +1304,6 @@ export default function CreatePartyScreen() {
                 </Text>
               </View>
 
-              {/* Flyer Preview */}
               {mediaGallery.length > 0 && (
                 <ExpoImage
                   source={{ uri: mediaGallery[0].uri }}
@@ -1286,7 +1312,6 @@ export default function CreatePartyScreen() {
                 />
               )}
 
-              {/* Party Details */}
               <View className="bg-[#150d1e] border border-white/5 rounded-3xl p-6 mb-6">
                 <Text className="text-white text-2xl font-extrabold mb-3">
                   {title}
@@ -1304,10 +1329,12 @@ export default function CreatePartyScreen() {
                   </Text>
                 </View>
 
-                <View className="flex-row items-center mb-5 bg-[#09030e] self-start px-3 py-1.5 rounded-full border border-white/5">
+                <View className="flex-row items-center mb-3 bg-[#09030e] self-start px-3 py-1.5 rounded-full border border-white/5">
                   <Ionicons name="location-outline" size={14} color="#a855f7" />
                   <Text className="text-gray-200 text-xs font-semibold ml-2">
-                    {locationTBA ? "Location TBA" : `${location}, ${city}`}
+                    {locationTBA
+                      ? `TBA — ${city}, ${state}, ${country}`
+                      : `${location}, ${city}, ${state}`}
                   </Text>
                 </View>
 
@@ -1325,7 +1352,6 @@ export default function CreatePartyScreen() {
                 </View>
               </View>
 
-              {/* Ticket Tiers Preview */}
               <View className="bg-[#150d1e] border border-white/5 rounded-3xl p-6">
                 <Text className="text-white font-extrabold text-lg mb-4">
                   Ticket Tiers
@@ -1358,13 +1384,12 @@ export default function CreatePartyScreen() {
             </View>
           )}
 
-          {/* Navigation Buttons */}
+          {/* Navigation */}
           <View className="mt-8 gap-4 px-2">
             {currentStep < 5 ? (
               <TouchableOpacity
                 onPress={handleNext}
-                activeOpacity={0.8}
-                className="bg-white py-4 flex-row justify-center rounded-2xl items-center shadow-lg shadow-white/10"
+                className="bg-white py-4 flex-row justify-center rounded-2xl items-center"
               >
                 <Text className="text-black text-lg font-extrabold pb-1">
                   Continue
@@ -1374,23 +1399,20 @@ export default function CreatePartyScreen() {
               <TouchableOpacity
                 onPress={handlePublish}
                 disabled={publishing}
-                activeOpacity={0.8}
-                className="bg-purple-600 py-4 flex-row justify-center rounded-2xl items-center shadow-lg shadow-purple-600/30"
+                className="bg-purple-600 py-4 flex-row justify-center rounded-2xl items-center"
               >
                 {publishing ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
-                  <Text className="text-white text-lg font-extrabold flex-row items-center pb-1">
+                  <Text className="text-white text-lg font-extrabold pb-1">
                     🚀 Publish Party
                   </Text>
                 )}
               </TouchableOpacity>
             )}
-
             {currentStep > 1 && currentStep < 5 && (
               <TouchableOpacity
                 onPress={handleBack}
-                activeOpacity={0.7}
                 className="py-3 items-center"
               >
                 <Text className="text-gray-400 font-bold">Cancel / Back</Text>

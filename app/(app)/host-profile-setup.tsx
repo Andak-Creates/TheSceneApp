@@ -4,22 +4,24 @@ import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import React, { useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "../../stores/authStore";
+import { useUserStore } from "../../stores/userStore";
 
 export default function HostProfileSetupScreen() {
   const { user } = useAuthStore();
+  const { profile: userProfile } = useUserStore();
   const [profiles, setProfiles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
@@ -42,6 +44,7 @@ export default function HostProfileSetupScreen() {
         .from("host_profiles")
         .select("*")
         .eq("owner_id", user.id)
+        .is("deletion_requested_at", null) // hide soft-deleted profiles
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -98,7 +101,6 @@ export default function HostProfileSetupScreen() {
       }
 
       if (selectedProfileId) {
-        // Update
         const { error } = await supabase
           .from("host_profiles")
           .update({
@@ -112,7 +114,6 @@ export default function HostProfileSetupScreen() {
         if (error) throw error;
         Alert.alert("Success", "Host profile updated!");
       } else {
-        // Insert
         const { error } = await supabase
           .from("host_profiles")
           .insert({
@@ -140,46 +141,96 @@ export default function HostProfileSetupScreen() {
   const handleDelete = async () => {
     if (!selectedProfileId) return;
 
-    // Check if there are parties linked to this profile
-    const { count, error: countError } = await supabase
+    // Check for upcoming parties
+    const { count } = await supabase
       .from("parties")
-      .select("id", { count: 'exact', head: true })
-      .eq("host_profile_id", selectedProfileId);
+      .select("id", { count: "exact", head: true })
+      .eq("host_profile_id", selectedProfileId)
+      .eq("is_published", true);
 
-    if (countError) {
-      console.error("Error checking parties:", countError);
-    }
+    const partyWarning = count && count > 0
+      ? `\n\nThis profile has ${count} active ${count === 1 ? "party" : "parties"} which will be hidden immediately and tickets will be cancelled.`
+      : "";
 
-    const message = count && count > 0 
-      ? `This brand has ${count} parties linked to it. Deleting it will remove the brand association from those parties. Are you sure?`
-      : "Are you sure you want to delete this brand profile?";
+    Alert.alert(
+      "Delete Host Profile",
+      `Your host profile will be deactivated immediately and permanently deleted in 10 days. You can contact support to restore it within that window.${partyWarning}`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Request Deletion",
+          style: "destructive",
+          onPress: () => {
+            Alert.alert(
+              "Are you sure?",
+              "This profile and all its parties will be hidden immediately.",
+              [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Yes, Delete Profile",
+                  style: "destructive",
+                  onPress: async () => {
+                    setSaving(true);
+                    try {
+                      // Soft delete — sets deletion_requested_at
+                      // DB trigger will hide all parties under this profile
+                      const { error } = await supabase
+                        .from("host_profiles")
+                        .update({
+                          deletion_requested_at: new Date().toISOString(),
+                        })
+                        .eq("id", selectedProfileId);
 
-    Alert.alert("Delete Brand", message, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          setSaving(true);
-          try {
-            const { error } = await supabase
-              .from("host_profiles")
-              .delete()
-              .eq("id", selectedProfileId);
+                      if (error) throw error;
 
-            if (error) throw error;
-            Alert.alert("Deleted", "Host profile has been removed.");
-            setIsEditing(false);
-            resetForm();
-            fetchProfiles();
-          } catch (err: any) {
-            Alert.alert("Error", err.message || "Failed to delete profile");
-          } finally {
-            setSaving(false);
-          }
-        }
-      }
-    ]);
+                      // Notify admins
+                      const { data: admins } = await supabase
+                        .from("profiles")
+                        .select("id")
+                        .eq("is_admin", true);
+
+                      if (admins && admins.length > 0) {
+                        await supabase.from("notifications").insert(
+                          admins.map((admin) => ({
+                            user_id: admin.id,
+                            title: "🗑️ Host profile deletion requested",
+                            body: `Host profile "${name}" (@${userProfile?.username}) has been scheduled for deletion in 10 days.`,
+                            type: "general",
+                            data: {
+                              type: "host_profile_deletion",
+                              host_profile_id: selectedProfileId,
+                              owner_id: user?.id,
+                              profile_name: name,
+                              deletion_date: new Date(
+                                Date.now() + 10 * 24 * 60 * 60 * 1000
+                              ).toISOString(),
+                            },
+                            is_read: false,
+                          }))
+                        );
+                      }
+
+                      Alert.alert(
+                        "Deletion Scheduled",
+                        "Your host profile has been deactivated and will be permanently deleted in 10 days. Contact support@thescene.app to restore it."
+                      );
+
+                      setIsEditing(false);
+                      resetForm();
+                      fetchProfiles();
+                    } catch (err: any) {
+                      Alert.alert("Error", err.message || "Failed to request deletion");
+                    } finally {
+                      setSaving(false);
+                    }
+                  },
+                },
+              ]
+            );
+          },
+        },
+      ]
+    );
   };
 
   const resetForm = () => {
@@ -227,7 +278,9 @@ export default function HostProfileSetupScreen() {
               <Ionicons name="arrow-back" size={20} color="#fff" />
             </TouchableOpacity>
             <Text className="text-white text-xl font-bold ml-4">
-              {isEditing ? (selectedProfileId ? "Edit Profile" : "New Profile") : "Host Profiles"}
+              {isEditing
+                ? selectedProfileId ? "Edit Profile" : "New Profile"
+                : "Host Profiles"}
             </Text>
           </View>
           {!isEditing && (
@@ -244,15 +297,9 @@ export default function HostProfileSetupScreen() {
       <ScrollView className="flex-1 px-6 pt-6">
         {isEditing ? (
           <View>
-            <TouchableOpacity
-              onPress={handlePickImage}
-              className="items-center mb-8"
-            >
+            <TouchableOpacity onPress={handlePickImage} className="items-center mb-8">
               {avatarUri ? (
-                <Image
-                  source={{ uri: avatarUri }}
-                  className="w-32 h-32 rounded-full"
-                />
+                <Image source={{ uri: avatarUri }} className="w-32 h-32 rounded-full" />
               ) : (
                 <View className="w-32 h-32 rounded-full bg-white/5 border-2 border-dashed border-white/10 items-center justify-center">
                   <Ionicons name="camera" size={40} color="#666" />
@@ -289,7 +336,7 @@ export default function HostProfileSetupScreen() {
             <TouchableOpacity
               onPress={handleSave}
               disabled={saving}
-              className="bg-purple-600 py-4 rounded-2xl items-center shadow-lg shadow-purple-600/30 mb-4"
+              className="bg-purple-600 py-4 rounded-2xl items-center mb-4"
             >
               {saving ? (
                 <ActivityIndicator color="#fff" />
@@ -325,7 +372,7 @@ export default function HostProfileSetupScreen() {
                 </Text>
                 <TouchableOpacity
                   onPress={startCreate}
-                  className="bg-purple-600 px-8 py-4 rounded-2xl shadow-lg shadow-purple-600/40"
+                  className="bg-purple-600 px-8 py-4 rounded-2xl"
                 >
                   <Text className="text-white font-bold text-lg">Create First Brand</Text>
                 </TouchableOpacity>

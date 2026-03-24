@@ -1,3 +1,4 @@
+import AttendancePill from "@/components/AttendancePill";
 import CommentsBottomSheet from "@/components/CommentsBottomSheet";
 import MediaGalleryViewer from "@/components/MediaGalleryViewer";
 import TBAToggle from "@/components/TBAToggle";
@@ -5,9 +6,11 @@ import { useAudioStore } from "@/stores/audioStore";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { decode } from "base64-arraybuffer";
+import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import * as VideoThumbnails from "expo-video-thumbnails";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -30,6 +33,7 @@ import Animated, {
   useSharedValue,
   withSpring,
 } from "react-native-reanimated";
+import { getCurrencySymbol } from "../../lib/currency";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "../../stores/authStore";
 
@@ -48,6 +52,7 @@ interface Party {
   music_genres: string[];
   vibes: string[];
   host_id: string;
+  currency_code?: string;
   // TBA fields
   date_tba?: boolean;
   location_tba?: boolean;
@@ -81,19 +86,6 @@ interface Party {
   }[];
 }
 
-interface Comment {
-  id: string;
-  comment_text: string;
-  created_at: string;
-  reply_count: number;
-  parent_comment_id: string | null;
-  user: {
-    id: string;
-    username: string;
-    avatar_url: string | null;
-  };
-}
-
 interface TicketTier {
   id: string;
   name: string;
@@ -107,6 +99,7 @@ export default function PartyDetailScreen() {
   const params = useLocalSearchParams();
   const { user } = useAuthStore();
   const partyId = params.id as string;
+  const openComments = params.openComments === "true";
   const viewRecorded = useRef(false);
   const { setActiveVideoId } = useAudioStore();
   const { setFeedActive } = useAudioStore();
@@ -128,6 +121,7 @@ export default function PartyDetailScreen() {
   const [party, setParty] = useState<Party | null>(null);
   const [loading, setLoading] = useState(true);
   const [isCommentsVisible, setIsCommentsVisible] = useState(false);
+  const currencySymbol = getCurrencySymbol(party?.currency_code || "NGN");
 
   // Floating button movement
   const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } =
@@ -185,6 +179,15 @@ export default function PartyDetailScreen() {
   const [totalSold, setTotalSold] = useState(0);
   const [minPrice, setMinPrice] = useState(0);
 
+  // Ticket Management States
+  const [isManagingTickets, setIsManagingTickets] = useState(false);
+  const [newTierName, setNewTierName] = useState("");
+  const [newTierPrice, setNewTierPrice] = useState("");
+  const [newTierQuantity, setNewTierQuantity] = useState("");
+  const [restockAmounts, setRestockAmounts] = useState<{
+    [key: string]: string;
+  }>({});
+
   const recordPartyView = async () => {
     if (!partyId || viewRecorded.current) return;
 
@@ -237,6 +240,118 @@ export default function PartyDetailScreen() {
       }
     } catch (error) {
       console.error("Error fetching ticket tiers:", error);
+    }
+  };
+
+  const handleRestockTier = async (tierId: string, currentQuantity: number) => {
+    if (!party) return;
+    const additional = parseInt(restockAmounts[tierId] || "0");
+    if (isNaN(additional) || additional <= 0) {
+      Alert.alert("Error", "Please enter a valid quantity to add");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const newTotal = currentQuantity + additional;
+      const { error: tierError } = await supabase
+        .from("ticket_tiers")
+        .update({ quantity: newTotal })
+        .eq("id", tierId);
+
+      if (tierError) throw tierError;
+
+      // Update party total quantity
+      const { data: partyData } = await supabase
+        .from("parties")
+        .select("ticket_quantity")
+        .eq("id", partyId)
+        .single();
+
+      const { error: partyError } = await supabase
+        .from("parties")
+        .update({
+          ticket_quantity: (partyData?.ticket_quantity || 0) + additional,
+        })
+        .eq("id", partyId);
+
+      if (partyError) throw partyError;
+
+      setRestockAmounts((prev) => ({ ...prev, [tierId]: "" }));
+      await fetchTicketTiers();
+      Alert.alert("Success", "Tickets restocked successfully");
+    } catch (error) {
+      console.error("Error restocking tickets:", error);
+      Alert.alert("Error", "Failed to restock tickets");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAddNewTier = async () => {
+    if (!party) return;
+    if (
+      !newTierName.trim() ||
+      !newTierPrice.trim() ||
+      !newTierQuantity.trim()
+    ) {
+      Alert.alert("Error", "Please fill in all fields");
+      return;
+    }
+
+    const price = parseFloat(newTierPrice);
+    const quantity = parseInt(newTierQuantity);
+
+    if (isNaN(price) || isNaN(quantity) || quantity <= 0) {
+      Alert.alert("Error", "Please enter valid price and quantity");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const { error: tierError } = await supabase.from("ticket_tiers").insert({
+        party_id: partyId,
+        name: newTierName.trim(),
+        price: price,
+        quantity: quantity,
+        quantity_sold: 0,
+        tier_order: ticketTiers.length,
+        is_active: true,
+        currency_code: party?.currency_code || "NGN",
+      });
+
+      if (tierError) throw tierError;
+
+      // Update party total quantity
+      const { data: partyData } = await supabase
+        .from("parties")
+        .select("ticket_quantity")
+        .eq("id", partyId)
+        .single();
+
+      const { error: partyError } = await supabase
+        .from("parties")
+        .update({
+          ticket_quantity: (partyData?.ticket_quantity || 0) + quantity,
+          ticket_price:
+            party?.ticket_price === null
+              ? price
+              : Math.min(party.ticket_price, price),
+        })
+        .eq("id", partyId);
+
+      if (partyError) throw partyError;
+
+      setNewTierName("");
+      setNewTierPrice("");
+      setNewTierQuantity("");
+      await fetchTicketTiers();
+      Alert.alert("Success", "New ticket tier added successfully");
+    } catch (error) {
+      console.error("Error adding ticket tier:", error);
+      Alert.alert("Error", "Failed to add ticket tier");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -331,10 +446,60 @@ export default function PartyDetailScreen() {
     }
   };
 
+  const handleDeleteParty = async () => {
+    if (!party) return;
+
+    Alert.alert(
+      "Delete Party",
+      "Are you sure you want to permanently delete this party? This action cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            setSaving(true);
+            try {
+              const { error } = await supabase
+                .from("parties")
+                .delete()
+                .eq("id", partyId);
+
+              if (error) throw error;
+
+              Alert.alert("Success", "Party deleted successfully");
+              router.replace("/host-dashboard");
+            } catch (error) {
+              console.error("Error deleting party:", error);
+              Alert.alert("Error", "Failed to delete party");
+            } finally {
+              setSaving(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const handleUpdateParty = async () => {
     if (!party) return;
     setSaving(true);
     try {
+      // Track what changed to notify users
+      const changedFields = [];
+      if (editedTitle.trim() !== party.title) changedFields.push("title");
+      if (editedDescription.trim() !== (party.description || ""))
+        changedFields.push("description");
+      if (editedLocation.trim() !== (party.location || ""))
+        changedFields.push("location");
+      if (editedCity.trim() !== (party.city || "")) changedFields.push("city");
+      if (editedDate !== (party.date || "")) changedFields.push("date");
+      if (editedDateTba !== party.date_tba) changedFields.push("date status");
+      if (editedLocationTba !== party.location_tba)
+        changedFields.push("location status");
+      if (editedDressCode.trim() !== (party.dress_code || ""))
+        changedFields.push("dress code");
+
       const { error } = await supabase
         .from("parties")
         .update({
@@ -350,6 +515,22 @@ export default function PartyDetailScreen() {
         .eq("id", partyId);
 
       if (error) throw error;
+
+      // Notify users if critical fields changed
+      if (changedFields.length > 0) {
+        supabase.functions
+          .invoke("send-party-notifications", {
+            body: {
+              party_id: partyId,
+              party_title: editedTitle.trim(),
+              changed_fields: changedFields,
+              notification_body: changedFields.join(", "),
+            },
+          })
+          .catch((err) =>
+            console.log("Update notification failed (non-fatal):", err),
+          );
+      }
 
       setParty({
         ...party,
@@ -421,39 +602,85 @@ export default function PartyDetailScreen() {
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.All,
-        allowsEditing: true,
-        quality: 0.8,
-        base64: true,
+        allowsEditing: false,
+        quality: 0.7,
+        base64: false,
       });
 
-      if (result.canceled || !result.assets[0].base64) return;
+      if (result.canceled || !result.assets[0]) return;
 
       setSaving(true);
       const asset = result.assets[0];
       const isVideo = asset.type === "video";
-      const fileExt = isVideo ? "mp4" : "jpg";
-      const fileName = `${partyId}/${Date.now()}.${fileExt}`;
-      const filePath = `parties/${fileName}`;
 
-      // Upload to storage
-      const { error: uploadError } = await supabase.storage
-        .from("party-media")
-        .upload(filePath, decode(asset.base64!), {
-          contentType: isVideo ? "video/mp4" : "image/jpeg",
-          upsert: true,
+      let uploadData: ArrayBuffer;
+      let contentType: string;
+      let fileExt: string;
+
+      if (isVideo) {
+        const response = await fetch(asset.uri);
+        uploadData = await response.arrayBuffer();
+        fileExt = asset.uri.split(".").pop()?.toLowerCase() || "mov";
+        contentType = fileExt === "mp4" ? "video/mp4" : "video/quicktime";
+      } else {
+        const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+          encoding: "base64" as any,
         });
+        uploadData = decode(base64);
+        fileExt = "jpg";
+        contentType = "image/jpeg";
+      }
+
+      const filePath = `party-media/${partyId}/${Date.now()}.${fileExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("flyers")
+        .upload(filePath, uploadData, { contentType, upsert: true });
 
       if (uploadError) throw uploadError;
 
       const {
         data: { publicUrl },
-      } = supabase.storage.from("party-media").getPublicUrl(filePath);
+      } = supabase.storage.from("flyers").getPublicUrl(filePath);
 
-      // Insert into database
+      // Generate thumbnail for videos
+      let thumbnailUrl: string | null = null;
+      if (isVideo) {
+        try {
+          const { uri: thumbUri } = await VideoThumbnails.getThumbnailAsync(
+            asset.uri,
+            { time: 1000, quality: 0.6 },
+          );
+
+          const thumbBase64 = await FileSystem.readAsStringAsync(thumbUri, {
+            encoding: "base64" as any,
+          });
+
+          const thumbPath = `party-media/${partyId}/thumb_${Date.now()}.jpg`;
+
+          const { error: thumbUploadError } = await supabase.storage
+            .from("flyers")
+            .upload(thumbPath, decode(thumbBase64), {
+              contentType: "image/jpeg",
+              upsert: true,
+            });
+
+          if (!thumbUploadError) {
+            const {
+              data: { publicUrl: thumbPublicUrl },
+            } = supabase.storage.from("flyers").getPublicUrl(thumbPath);
+            thumbnailUrl = thumbPublicUrl;
+          }
+        } catch (thumbError) {
+          console.log("Thumbnail generation failed (non-fatal):", thumbError);
+        }
+      }
+
       const { error: dbError } = await supabase.from("party_media").insert({
         party_id: partyId,
         media_url: publicUrl,
         media_type: isVideo ? "video" : "image",
+        thumbnail_url: thumbnailUrl,
         display_order: (party.media?.length || 0) + 1,
         is_primary: (party.media?.length || 0) === 0,
       });
@@ -539,7 +766,7 @@ export default function PartyDetailScreen() {
 
   const handleShareLink = async () => {
     if (!party) return;
-    const url = `https://thescene.app/party/${partyId}`;
+    const url = `https://thescene.vercel.app/party/${partyId}`;
     try {
       await Share.share({
         message: `Check out "${party.title}" on TheScene! ${url}`,
@@ -571,6 +798,64 @@ export default function PartyDetailScreen() {
     } catch (error) {
       setParty({ ...party, is_bookmarked: wasBookmarked });
     }
+  };
+
+  const handleReportParty = async () => {
+    if (!user || !party) return;
+    try {
+      const { error } = await supabase.from("reports").insert({
+        reporter_id: user.id,
+        target_type: "party",
+        target_id: partyId,
+        reason: "Flagged by user for review",
+        status: "pending",
+      });
+      if (error) throw error;
+      Alert.alert(
+        "Report Submitted",
+        "Thank you. Our team will review this party within 24 hours.",
+      );
+    } catch (e) {
+      console.error(e);
+      Alert.alert("Error", "Failed to submit report. Please try again.");
+    }
+  };
+
+  const handleBlockHost = async () => {
+    if (!user || !party) return;
+    Alert.alert(
+      "Block Host",
+      "Are you sure you want to block this host? You will no longer see their content.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Block",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const { error } = await supabase.from("blocked_users").insert({
+                blocker_id: user.id,
+                blocked_id: party.host_id,
+              });
+              if (error) throw error;
+              Alert.alert(
+                "Host Blocked",
+                "You have successfully blocked this host.",
+              );
+              router.back();
+            } catch (e: any) {
+              console.error(e);
+              if (e.code === "23505") {
+                // unique violation
+                Alert.alert("Info", "You have already blocked this host.");
+                return;
+              }
+              Alert.alert("Error", "Could not block host.");
+            }
+          },
+        },
+      ],
+    );
   };
 
   const handleOpenMaps = () => {
@@ -654,6 +939,12 @@ export default function PartyDetailScreen() {
                 {!isEditing && (
                   <View className="flex-row gap-2">
                     <TouchableOpacity
+                      onPress={() => setIsManagingTickets(true)}
+                      className="w-10 h-10 rounded-full bg-black/50 items-center justify-center"
+                    >
+                      <Ionicons name="ticket-outline" size={20} color="#fff" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
                       onPress={() =>
                         router.push({
                           pathname: "/party/[id]/analytics",
@@ -711,12 +1002,36 @@ export default function PartyDetailScreen() {
             )}
 
             {!isEditing && (
-              <TouchableOpacity
-                onPress={handleShareLink}
-                className="w-10 h-10 rounded-full bg-black/50 items-center justify-center"
-              >
-                <Ionicons name="share-outline" size={24} color="#fff" />
-              </TouchableOpacity>
+              <View className="flex-row items-center gap-2">
+                <TouchableOpacity
+                  onPress={handleShareLink}
+                  className="w-10 h-10 rounded-full bg-black/50 items-center justify-center"
+                >
+                  <Ionicons name="share-outline" size={24} color="#fff" />
+                </TouchableOpacity>
+                {user?.id !== party.host_id && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      Alert.alert("Party Options", "Please choose an action", [
+                        {
+                          text: "Report Party",
+                          onPress: handleReportParty,
+                          style: "destructive",
+                        },
+                        {
+                          text: "Block Host",
+                          onPress: handleBlockHost,
+                          style: "destructive",
+                        },
+                        { text: "Cancel", style: "cancel" },
+                      ]);
+                    }}
+                    className="w-10 h-10 rounded-full bg-black/50 items-center justify-center"
+                  >
+                    <Ionicons name="ellipsis-vertical" size={24} color="#fff" />
+                  </TouchableOpacity>
+                )}
+              </View>
             )}
           </View>
         </View>
@@ -783,6 +1098,7 @@ export default function PartyDetailScreen() {
           <Text className="text-purple-400 font-semibold mb-2">
             Hosted by {party.host_profile?.name || "Unknown Brand"}
           </Text>
+          <AttendancePill ticketsSold={party.tickets_sold} />
 
           {isEditing ? (
             <TextInput
@@ -1070,7 +1386,7 @@ export default function PartyDetailScreen() {
               <Text className="text-purple-400 font-bold text-xl">
                 {party.ticket_price_tba
                   ? "Price TBA"
-                  : `${ticketTiers.length > 1 ? "From " : ""}₦${displayPrice?.toLocaleString() ?? "0"}`}
+                  : `${ticketTiers.length > 1 ? "From " : ""}${currencySymbol}${displayPrice?.toLocaleString() ?? "0"}`}
               </Text>
             </View>
             {!party.ticket_price_tba && (
@@ -1098,31 +1414,66 @@ export default function PartyDetailScreen() {
           </View>
 
           {/* Engagement Stats */}
-          <View className="flex-row items-center mb-6">
-            <TouchableOpacity
-              className="flex-row items-center mr-6"
-              onPress={handleLike}
-            >
-              <Ionicons
-                name={party.is_liked ? "heart" : "heart-outline"}
-                size={28}
-                color={party.is_liked ? "#ef4444" : "#fff"}
-              />
-              <Text className="text-white ml-2 font-semibold text-base">
-                {party.likes_count}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              className="flex-row items-center"
-              onPress={handleBookmark}
-            >
-              <Ionicons
-                name={party.is_bookmarked ? "bookmark" : "bookmark-outline"}
-                size={26}
-                color={party.is_bookmarked ? "#a855f7" : "#fff"}
-              />
-            </TouchableOpacity>
+          <View className="flex-row items-center justify-between mb-6">
+            <View className="flex-row items-center">
+              <TouchableOpacity
+                className="flex-row items-center mr-6"
+                onPress={handleLike}
+              >
+                <Ionicons
+                  name={party.is_liked ? "heart" : "heart-outline"}
+                  size={28}
+                  color={party.is_liked ? "#ef4444" : "#fff"}
+                />
+                <Text className="text-white ml-2 font-semibold text-base">
+                  {party.likes_count}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                className="flex-row items-center"
+                onPress={handleBookmark}
+              >
+                <Ionicons
+                  name={party.is_bookmarked ? "bookmark" : "bookmark-outline"}
+                  size={26}
+                  color={party.is_bookmarked ? "#a855f7" : "#fff"}
+                />
+              </TouchableOpacity>
+              <TouchableOpacity
+                className="flex-row items-center ml-6"
+                onPress={handleShareLink}
+              >
+                <Ionicons name="share-social-outline" size={26} color="#fff" />
+              </TouchableOpacity>
+            </View>
+
+            {isEditing && (
+              <View className="flex-row items-center gap-3">
+                <TouchableOpacity
+                  onPress={() => setIsManagingTickets(true)}
+                  className="flex-row items-center bg-purple-600/10 border border-purple-600/20 px-4 py-2 rounded-xl"
+                >
+                  <Ionicons name="ticket-outline" size={20} color="#a855f7" />
+                  <Text className="text-purple-400 font-bold ml-2">Manage</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
+
+          {user?.id === party.host_id && (
+            <View className="mt-4 mb-8 items-center">
+              <TouchableOpacity
+                onPress={handleDeleteParty}
+                disabled={saving}
+                className="py-2 px-4 rounded-xl border border-white/5 bg-white/5 items-center justify-center flex-row"
+              >
+                <Ionicons name="trash-outline" size={16} color="#da2d2dff" />
+                <Text className="text-[#da2d2dff] ml-2 text-sm font-medium">
+                  Delete Party
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       </ScrollView>
 
@@ -1168,7 +1519,7 @@ export default function PartyDetailScreen() {
               ? "This event has ended"
               : party.ticket_price_tba
                 ? "Get Tickets • TBA"
-                : `Get Tickets • ${ticketTiers.length > 1 ? "From " : ""}₦${displayPrice?.toLocaleString() ?? "0"}`}
+                : `Get Tickets • ${ticketTiers.length > 1 ? "From " : ""}${currencySymbol}${displayPrice?.toLocaleString() ?? "0"}`}
           </Text>
         </TouchableOpacity>
       </View>
@@ -1178,6 +1529,124 @@ export default function PartyDetailScreen() {
         isVisible={isCommentsVisible}
         onClose={() => setIsCommentsVisible(false)}
       />
+
+      {/* Ticket Management Modal */}
+      <Modal
+        visible={isManagingTickets}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsManagingTickets(false)}
+      >
+        <View className="flex-1 bg-black/60 justify-end">
+          <View className="bg-[#191022] rounded-t-3xl h-[85%] border-t border-white/10">
+            <View className="flex-row items-center justify-between p-6 border-b border-white/5">
+              <Text className="text-white text-xl font-bold">
+                Manage Tickets
+              </Text>
+              <TouchableOpacity onPress={() => setIsManagingTickets(false)}>
+                <Ionicons name="close" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView className="flex-1 p-6">
+              {/* Existing Tiers Section */}
+              <Text className="text-purple-400 text-xs font-bold uppercase tracking-widest mb-4">
+                Restock Existing Tiers
+              </Text>
+              {ticketTiers.map((tier) => (
+                <View
+                  key={tier.id}
+                  className="bg-white/5 rounded-2xl p-4 mb-4 border border-white/5"
+                >
+                  <View className="flex-row justify-between items-center mb-3">
+                    <View>
+                      <Text className="text-white font-bold">{tier.name}</Text>
+                      <Text className="text-gray-400 text-xs">
+                        {tier.quantity_sold} sold / {tier.quantity} total
+                      </Text>
+                    </View>
+                    <Text className="text-purple-400 font-bold">
+                      {currencySymbol}
+                      {tier.price.toLocaleString()}
+                    </Text>
+                  </View>
+                  <View className="flex-row gap-3">
+                    <TextInput
+                      className="flex-1 bg-white/10 rounded-xl px-4 py-2 text-white"
+                      placeholder="Add quantity..."
+                      placeholderTextColor="#666"
+                      keyboardType="number-pad"
+                      value={restockAmounts[tier.id] || ""}
+                      onChangeText={(val) =>
+                        setRestockAmounts((prev) => ({
+                          ...prev,
+                          [tier.id]: val,
+                        }))
+                      }
+                    />
+                    <TouchableOpacity
+                      onPress={() => handleRestockTier(tier.id, tier.quantity)}
+                      disabled={saving}
+                      className="bg-purple-600 px-6 py-2 rounded-xl justify-center"
+                    >
+                      {saving ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Text className="text-white font-bold">Add</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+
+              <View className="h-px bg-white/5 my-6" />
+
+              {/* New Tier Section */}
+              <Text className="text-purple-400 text-xs font-bold uppercase tracking-widest mb-4">
+                Create New Tier
+              </Text>
+              <View className="bg-white/5 rounded-2xl p-4 border border-white/5 mb-20">
+                <TextInput
+                  className="bg-white/10 rounded-xl px-4 py-3 text-white mb-3"
+                  placeholder="Tier name (e.g. VIP Late Bird)"
+                  placeholderTextColor="#666"
+                  value={newTierName}
+                  onChangeText={setNewTierName}
+                />
+                <View className="flex-row gap-3 mb-4">
+                  <TextInput
+                    className="flex-1 bg-white/10 rounded-xl px-4 py-3 text-white"
+                    placeholder="Price"
+                    placeholderTextColor="#666"
+                    keyboardType="numeric"
+                    value={newTierPrice}
+                    onChangeText={setNewTierPrice}
+                  />
+                  <TextInput
+                    className="flex-1 bg-white/10 rounded-xl px-4 py-3 text-white"
+                    placeholder="Quantity"
+                    placeholderTextColor="#666"
+                    keyboardType="number-pad"
+                    value={newTierQuantity}
+                    onChangeText={setNewTierQuantity}
+                  />
+                </View>
+                <TouchableOpacity
+                  onPress={handleAddNewTier}
+                  disabled={saving}
+                  className="bg-white py-4 rounded-xl items-center"
+                >
+                  {saving ? (
+                    <ActivityIndicator size="small" color="#000" />
+                  ) : (
+                    <Text className="text-black font-bold">Create Tier</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }

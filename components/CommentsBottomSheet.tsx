@@ -1,3 +1,4 @@
+import { sendPush } from "@/lib/sendPush";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -27,6 +28,12 @@ interface Comment {
     username: string;
     avatar_url: string | null;
   };
+  host_profile?: {
+    id: string;
+    name: string;
+    avatar_url: string | null;
+    is_verified: boolean;
+  } | null;
 }
 
 interface CommentsBottomSheetProps {
@@ -50,48 +57,63 @@ export default function CommentsBottomSheet({
   const [replyingTo, setReplyingTo] = useState<{
     id: string;
     username: string;
+    userId: string;
   } | null>(null);
-  const [expandedComments, setExpandedComments] = useState<Set<string>>(
-    new Set()
-  );
+  const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set());
+  const [partyHostId, setPartyHostId] = useState<string | null>(null);
+  const [hostProfileMap, setHostProfileMap] = useState<Record<string, any>>({});
   const inputRef = useRef<TextInput>(null);
   const flatListRef = useRef<FlatList>(null);
 
   useEffect(() => {
     if (isVisible) {
+      fetchPartyHost();
       fetchComments();
       if (autoFocus) {
-          // Small delay to allow modal animation to start
-          setTimeout(() => {
-              inputRef.current?.focus();
-          }, 500);
+        setTimeout(() => inputRef.current?.focus(), 500);
       }
     }
   }, [isVisible, partyId]);
 
+  const fetchPartyHost = async () => {
+    try {
+      const { data } = await supabase
+        .from("parties")
+        .select("host_id, host_profile_id, host_profile:host_profiles!host_profile_id(id, name, avatar_url, is_verified)")
+        .eq("id", partyId)
+        .single();
+
+      if (data) {
+        setPartyHostId(data.host_id);
+        if (data.host_id && data.host_profile) {
+          setHostProfileMap({ [data.host_id]: data.host_profile });
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching party host:", error);
+    }
+  };
+
   const fetchComments = async () => {
     try {
       setLoading(true);
-
-      // Fetch top-level comments (no parent)
       const { data, error } = await supabase
         .from("party_comments")
-        .select(
-          `
+        .select(`
           *,
           user:profiles!user_id (
             id,
             username,
             avatar_url
           )
-        `
-        )
+        `)
         .eq("party_id", partyId)
         .is("parent_comment_id", null)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
       setComments(data || []);
+      setExpandedComments(new Set());
     } catch (error) {
       console.error("Error fetching comments:", error);
     } finally {
@@ -103,16 +125,14 @@ export default function CommentsBottomSheet({
     try {
       const { data, error } = await supabase
         .from("party_comments")
-        .select(
-          `
+        .select(`
           *,
           user:profiles!user_id (
             id,
             username,
             avatar_url
           )
-        `
-        )
+        `)
         .eq("parent_comment_id", commentId)
         .order("created_at", { ascending: true });
 
@@ -124,79 +144,167 @@ export default function CommentsBottomSheet({
     }
   };
 
-  const handleSubmitComment = async () => {
-    if (!user || !newComment.trim()) return;
+  const getDisplayName = async (): Promise<string> => {
+    if (!user) return "Someone";
+    if (partyHostId && user.id === partyHostId && hostProfileMap[user.id]) {
+      return hostProfileMap[user.id].name;
+    }
+    const { data } = await supabase
+      .from("profiles")
+      .select("username")
+      .eq("id", user.id)
+      .single();
+    return data?.username || "Someone";
+  };
 
-    setSubmitting(true);
+const handleSubmitComment = async () => {
+  if (!user || !newComment.trim()) return;
+  setSubmitting(true);
 
-    try {
-      const { error } = await supabase.from("party_comments").insert({
+  try {
+    const { data: inserted, error } = await supabase
+      .from("party_comments")
+      .insert({
         party_id: partyId,
         user_id: user.id,
         comment_text: newComment.trim(),
         parent_comment_id: replyingTo?.id || null,
+      })
+      .select(`
+        *,
+        user:profiles!user_id (
+          id,
+          username,
+          avatar_url
+        )
+      `)
+      .single();
+
+    if (error) throw error;
+
+    const displayName = await getDisplayName();
+
+    if (replyingTo) {
+      // Append reply directly under its parent without wiping the list
+      setComments((prev) => {
+        const parentIndex = prev.findIndex((c) => c.id === replyingTo.id);
+        if (parentIndex === -1) return [...prev, inserted];
+
+        const nextTopLevelIndex = prev.findIndex(
+          (c, i) => i > parentIndex && c.parent_comment_id === null
+        );
+        const insertAt =
+          nextTopLevelIndex === -1 ? prev.length : nextTopLevelIndex;
+
+        const newList = [...prev];
+        newList.splice(insertAt, 0, inserted);
+        return newList;
       });
 
-      if (error) throw error;
+      // Mark parent as expanded so replies stay visible
+      // DB trigger handles reply_count increment automatically
+      setExpandedComments((prev) => new Set(prev).add(replyingTo.id));
 
-      setNewComment("");
-      setReplyingTo(null);
-      Keyboard.dismiss();
-      await fetchComments();
-    } catch (error) {
-      console.error("Error posting comment:", error);
-    } finally {
-      setSubmitting(false);
+      // Notify the person being replied to
+      if (replyingTo.userId !== user.id) {
+        await supabase.from("notifications").insert({
+          user_id: replyingTo.userId,
+          title: "💬 New reply",
+          body: `${displayName} replied to your comment`,
+          type: "comment_reply",
+          data: { party_id: partyId, comment_id: replyingTo.id },
+          is_read: false,
+        });
+        sendPush(
+          replyingTo.userId,
+          "💬 New reply",
+          `${displayName} replied to your comment`,
+          { type: "comment_reply", party_id: partyId, comment_id: replyingTo.id }
+        );
+      }
+    } else {
+      // Prepend new top-level comment to the top of the list
+      setComments((prev) => [inserted, ...prev]);
+
+      // Notify host
+      if (partyHostId && partyHostId !== user.id) {
+        await supabase.from("notifications").insert({
+          user_id: partyHostId,
+          title: "💬 New comment",
+          body: `${displayName} commented on your party`,
+          type: "party_comment",
+          data: { party_id: partyId },
+          is_read: false,
+        });
+        sendPush(
+          partyHostId,
+          "💬 New comment",
+          `${displayName} commented on your party`,
+          { type: "party_comment", party_id: partyId }
+        );
+      }
     }
-  };
 
-  const handleReply = (commentId: string, username: string) => {
-    setReplyingTo({ id: commentId, username });
+    setNewComment("");
+    setReplyingTo(null);
+    Keyboard.dismiss();
+  } catch (error) {
+    console.error("Error posting comment:", error);
+  } finally {
+    setSubmitting(false);
+  }
+};
+
+  const handleReply = (commentId: string, username: string, userId: string) => {
+    setReplyingTo({ id: commentId, username, userId });
     inputRef.current?.focus();
   };
 
   const handleViewReplies = async (commentId: string) => {
     if (expandedComments.has(commentId)) {
-      // Collapse
+      // Collapse — remove replies from list
+      setComments((prev) =>
+        prev.filter((c) => c.parent_comment_id !== commentId)
+      );
       setExpandedComments((prev) => {
         const newSet = new Set(prev);
         newSet.delete(commentId);
         return newSet;
       });
     } else {
-      // Expand and fetch replies
+      // Expand — fetch fresh replies and splice into list
       const replies = await fetchReplies(commentId);
-
-      // Insert replies after the parent comment
       setComments((prev) => {
         const index = prev.findIndex((c) => c.id === commentId);
         if (index === -1) return prev;
-
         const newComments = [...prev];
-        // Remove old replies if any
-        const nextIndex = newComments.findIndex(
+        const nextTopLevelIndex = newComments.findIndex(
           (c, i) => i > index && c.parent_comment_id === null
         );
-        const endIndex = nextIndex === -1 ? newComments.length : nextIndex;
-
+        const endIndex =
+          nextTopLevelIndex === -1 ? newComments.length : nextTopLevelIndex;
         newComments.splice(index + 1, endIndex - index - 1, ...replies);
         return newComments;
       });
-
       setExpandedComments((prev) => new Set(prev).add(commentId));
     }
   };
 
   const renderComment = ({ item }: { item: Comment }) => {
     const isReply = item.parent_comment_id !== null;
+    const hostProfile = hostProfileMap[item.user.id] || null;
 
     return (
       <View className={isReply ? "ml-12" : ""}>
         <CommentItem
-          comment={item}
-          onReply={handleReply}
+          comment={{ ...item, host_profile: hostProfile }}
+          onReply={(commentId, username) =>
+            handleReply(commentId, username, item.user.id)
+          }
           onViewReplies={handleViewReplies}
           currentUserId={user?.id}
+          partyHostId={partyHostId || undefined}
+          isExpanded={expandedComments.has(item.id)}
         />
       </View>
     );
@@ -210,14 +318,8 @@ export default function CommentsBottomSheet({
       onRequestClose={onClose}
     >
       <View className="flex-1 bg-black/50">
-        {/* Tap outside to close */}
-        <TouchableOpacity
-          className="flex-1"
-          activeOpacity={1}
-          onPress={onClose}
-        />
+        <TouchableOpacity className="flex-1" activeOpacity={1} onPress={onClose} />
 
-        {/* Bottom Sheet */}
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           className="bg-[#191022] rounded-t-3xl"

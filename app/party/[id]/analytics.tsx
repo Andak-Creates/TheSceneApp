@@ -1,9 +1,12 @@
 import { useAudioStore } from "@/stores/audioStore";
 import { Ionicons } from "@expo/vector-icons";
+import * as FileSystem from "expo-file-system/legacy";
+import * as Sharing from "expo-sharing";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Image,
   RefreshControl,
   ScrollView,
@@ -277,6 +280,44 @@ export default function PartyAnalyticsScreen() {
     fetchAnalytics();
   };
 
+  const exportGuestList = async () => {
+    if (!analytics || analytics.attendees.length === 0) {
+      Alert.alert("No Data", "There are no attendees to export.");
+      return;
+    }
+
+    try {
+      const headers = ["Name", "Tier", "Purchased", "Used", "Total Paid", "Purchase Date", "Last Check In"];
+      const rows = analytics.attendees.map(a => [
+        `"${a.buyer_name.replace(/"/g, '""')}"`,
+        `"${a.tier_name}"`,
+        a.quantity_purchased,
+        a.quantity_used,
+        a.total_paid,
+        `"${new Date(a.purchased_at).toLocaleString()}"`,
+        a.last_check_in ? `"${new Date(a.last_check_in).toLocaleString()}"` : '"Not checked in"'
+      ]);
+
+      const csvContent = [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+
+      const filename = `guest_list_${analytics.party.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.csv`;
+      const fileUri = `${FileSystem.documentDirectory}${filename}`;
+      await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: FileSystem.EncodingType.UTF8 });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: "text/csv",
+          dialogTitle: "Export Guest List"
+        });
+      } else {
+        Alert.alert("Error", "Sharing is not available on this device.");
+      }
+    } catch (e) {
+      console.error("Export error:", e);
+      Alert.alert("Error", "Could not export guest list.");
+    }
+  };
+
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString("en-US", {
@@ -518,6 +559,18 @@ export default function PartyAnalyticsScreen() {
 
         {activeTab === "attendees" && (
           <View className="px-6 py-6">
+            {/* Guest List Header & Export */}
+            <View className="flex-row items-center justify-between mb-6">
+              <Text className="text-white font-bold text-lg">Guest List</Text>
+              <TouchableOpacity 
+                onPress={exportGuestList}
+                className="bg-purple-600/20 px-4 py-2 rounded-full border border-purple-600/30 flex-row items-center"
+              >
+                <Ionicons name="download-outline" size={16} color="#a855f7" />
+                <Text className="text-purple-400 font-bold ml-2">Export CSV</Text>
+              </TouchableOpacity>
+            </View>
+
             {/* Filter Buttons */}
             <View className="flex-row gap-2 mb-6">
               <TouchableOpacity

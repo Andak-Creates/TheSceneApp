@@ -214,7 +214,7 @@ export default function MediaGalleryViewer({
           {showDelete && onDelete && (
             <TouchableOpacity
               onPress={() => onDelete(filteredMedia[currentIndex].id)}
-              className="absolute top-4 left-4 bg-red-500/80 p-2 rounded-full"
+              className="absolute bottom-5 left-4 bg-red-500/90 p-3 rounded-full shadow-md"
               style={{ zIndex: 100 }}
             >
               <Ionicons name="trash-outline" size={20} color="#fff" />
@@ -240,16 +240,23 @@ export default function MediaGalleryViewer({
                   index === currentIndex ? "border-2 border-purple-500" : ""
                 }`}
               >
-                <RNImage
-                  source={{
-                    uri:
-                      item.media_type === "video"
-                        ? item.thumbnail_url || item.media_url
-                        : item.media_url,
-                  }}
-                  className="w-16 h-16 bg-gray-900"
-                  resizeMode="cover"
-                />
+                {item.media_type === "video" && !item.thumbnail_url ? (
+                  // No thumbnail yet — show a dark placeholder with play icon
+                  <View className="w-16 h-16 bg-gray-800 items-center justify-center">
+                    <Ionicons name="videocam" size={20} color="#666" />
+                  </View>
+                ) : (
+                  <RNImage
+                    source={{
+                      uri:
+                        item.media_type === "video"
+                          ? item.thumbnail_url!
+                          : item.media_url,
+                    }}
+                    className="w-16 h-16 bg-gray-900"
+                    resizeMode="cover"
+                  />
+                )}
                 {item.media_type === "video" && (
                   <View className="absolute inset-0 items-center justify-center">
                     <View className="bg-black/50 rounded-full p-1">

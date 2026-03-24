@@ -152,11 +152,16 @@ export default function TicketPurchaseScreen() {
     const appFee = ticketPrice * APP_FEE_PERCENTAGE;
     const totalPrice = ticketPrice + appFee;
 
-    // Determine currency — use party's currency if Paystack supports it, else NGN
+    // Determine currency — alert if unsupported instead of silently falling back to NGN
     const partyCurrency = party.currency_code || "NGN";
-    const paystackCurrency = PAYSTACK_CURRENCIES.includes(partyCurrency)
-      ? partyCurrency
-      : "NGN";
+    if (!PAYSTACK_CURRENCIES.includes(partyCurrency)) {
+      Alert.alert(
+        "Currency Not Supported",
+        `Paystack does not support ${partyCurrency} payments. The host needs to set their party currency to NGN, GHS, USD, ZAR, KES, or XOF.`,
+      );
+      return;
+    }
+    const paystackCurrency = partyCurrency;
 
     // Store for use in success callback
     pendingPurchase.current = {
@@ -170,48 +175,64 @@ export default function TicketPurchaseScreen() {
 
     setPurchasing(true);
 
-    // For react-native-paystack-webview v5+, the amount is expected in the major unit (e.g. Naira, not kobo)
     const amountInSmallestUnit = totalPrice;
 
-    popup.checkout({
-      email: user.email || "",
-      amount: amountInSmallestUnit,
-      currency: paystackCurrency,
-      channels: ["card", "bank_transfer", "ussd", "mobile_money", "bank"],
-      metadata: {
-        party_id: partyId,
-        party_title: party.title,
-        tier_id: selectedTier,
-        tier_name: tier.name,
-        quantity,
-        custom_fields: [
-          {
-            display_name: "Party",
-            variable_name: "party_title",
-            value: party.title,
-          },
-          {
-            display_name: "Ticket Type",
-            variable_name: "tier_name",
-            value: tier.name,
-          },
-          {
-            display_name: "Quantity",
-            variable_name: "quantity",
-            value: String(quantity),
-          },
-        ],
-      },
-      onSuccess: async (res: any) => {
-        const ref = res.transactionRef || res.transaction || res.trans || "";
-        await handlePaymentSuccess(ref);
-      },
-      onCancel: () => {
-        setPurchasing(false);
-        pendingPurchase.current = null;
-        Alert.alert("Cancelled", "Your ticket purchase was cancelled.");
-      },
-    } as any);
+    try {
+      popup.checkout({
+        email: user.email || "",
+        amount: amountInSmallestUnit,
+        currency: paystackCurrency,
+        reference: `TK_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
+        channels: ["card", "bank_transfer", "ussd", "mobile_money", "bank"],
+        metadata: {
+          party_id: partyId,
+          party_title: party.title,
+          tier_id: selectedTier,
+          tier_name: tier.name,
+          quantity,
+          custom_fields: [
+            {
+              display_name: "Party",
+              variable_name: "party_title",
+              value: party.title,
+            },
+            {
+              display_name: "Ticket Type",
+              variable_name: "tier_name",
+              value: tier.name,
+            },
+            {
+              display_name: "Quantity",
+              variable_name: "quantity",
+              value: String(quantity),
+            },
+          ],
+        },
+        onSuccess: async (res: any) => {
+          const ref = res.transactionRef || res.transaction || res.trans || "";
+          await handlePaymentSuccess(ref);
+        },
+        onCancel: () => {
+          setPurchasing(false);
+          pendingPurchase.current = null;
+          Alert.alert("Cancelled", "Your ticket purchase was cancelled.");
+        },
+        onError: (error: any) => {
+          setPurchasing(false);
+          pendingPurchase.current = null;
+          console.error("Paystack checkout error:", error);
+          Alert.alert("Error", "Could not open payment gateway. Please try again.");
+        },
+        onClose: () => {
+          setPurchasing(false);
+        },
+      } as any);
+    } catch (error) {
+      console.error("Paystack initiation error:", error);
+      setPurchasing(false);
+      pendingPurchase.current = null;
+      Alert.alert("Error", "Failed to start payment process.");
+    }
   };
 
   const handlePaymentSuccess = async (reference: string) => {

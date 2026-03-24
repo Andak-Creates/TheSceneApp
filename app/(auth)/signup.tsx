@@ -1,9 +1,10 @@
-import { FontAwesome } from "@expo/vector-icons";
+import { FontAwesome, Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   ImageBackground,
   KeyboardAvoidingView,
   Platform,
@@ -16,6 +17,8 @@ import {
 } from "react-native";
 import { useAuthStore } from "../../stores/authStore";
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export default function SignUpScreen() {
   const router = useRouter();
   const { signUp } = useAuthStore();
@@ -23,12 +26,12 @@ export default function SignUpScreen() {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const handleSignUp = async () => {
-    // Validation
     if (!username.trim() || !email.trim() || !password.trim()) {
       setError("Please fill in all fields");
       return;
@@ -36,6 +39,11 @@ export default function SignUpScreen() {
 
     if (username.length < 3) {
       setError("Username must be at least 3 characters");
+      return;
+    }
+
+    if (!EMAIL_REGEX.test(email.trim())) {
+      setError("Please enter a valid email address");
       return;
     }
 
@@ -47,19 +55,24 @@ export default function SignUpScreen() {
     setLoading(true);
     setError("");
 
-    const { error: signUpError } = await signUp(email, password, username);
+    const { error: signUpError } = await signUp(email.trim(), password, username.trim());
 
     setLoading(false);
 
     if (signUpError) {
       setError(signUpError.message || "Failed to sign up");
     } else {
-      // Navigate to onboarding
+      // Navigate to onboarding — root layout's auth guard will also
+      // redirect here, but we push explicitly for immediate UX
       router.replace("/(auth)/onboarding");
       setUsername("");
       setPassword("");
       setEmail("");
     }
+  };
+
+  const handleSocialComingSoon = () => {
+    Alert.alert("Coming Soon", "Social login will be available in a future update.");
   };
 
   return (
@@ -117,9 +130,7 @@ export default function SignUpScreen() {
             {/* Error Message */}
             {error ? (
               <View className="bg-red-500/20 border border-red-500/50 rounded-xl p-4 mb-4">
-                <Text className="text-red-300 text-sm font-medium">
-                  {error}
-                </Text>
+                <Text className="text-red-300 text-sm font-medium">{error}</Text>
               </View>
             ) : null}
 
@@ -127,9 +138,7 @@ export default function SignUpScreen() {
             <View className="gap-4 mb-6">
               {/* Username Input */}
               <View>
-                <Text className="text-gray-400 text-sm font-medium mb-2 ml-1">
-                  Username
-                </Text>
+                <Text className="text-gray-400 text-sm font-medium mb-2 ml-1">Username</Text>
                 <TextInput
                   className="bg-white/10 border border-white/20 rounded-xl h-14 px-5 text-white text-base"
                   placeholder="Choose a username"
@@ -143,9 +152,7 @@ export default function SignUpScreen() {
 
               {/* Email Input */}
               <View>
-                <Text className="text-gray-400 text-sm font-medium mb-2 ml-1">
-                  Email
-                </Text>
+                <Text className="text-gray-400 text-sm font-medium mb-2 ml-1">Email</Text>
                 <TextInput
                   className="bg-white/10 border border-white/20 rounded-xl h-14 px-5 text-white text-base"
                   placeholder="your@email.com"
@@ -160,19 +167,30 @@ export default function SignUpScreen() {
 
               {/* Password Input */}
               <View>
-                <Text className="text-gray-400 text-sm font-medium mb-2 ml-1">
-                  Password
-                </Text>
-                <TextInput
-                  className="bg-white/10 border border-white/20 rounded-xl h-14 px-5 text-white text-base"
-                  placeholder="Create a password"
-                  placeholderTextColor="#888"
-                  value={password}
-                  onChangeText={setPassword}
-                  secureTextEntry
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
+                <Text className="text-gray-400 text-sm font-medium mb-2 ml-1">Password</Text>
+                <View className="relative">
+                  <TextInput
+                    className="bg-white/10 border border-white/20 rounded-xl h-14 px-5 pr-14 text-white text-base"
+                    placeholder="Create a password (min 6 chars)"
+                    placeholderTextColor="#888"
+                    value={password}
+                    onChangeText={setPassword}
+                    secureTextEntry={!showPassword}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                  <TouchableOpacity
+                    onPress={() => setShowPassword((v) => !v)}
+                    className="absolute right-4 top-0 bottom-0 justify-center"
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons
+                      name={showPassword ? "eye-off-outline" : "eye-outline"}
+                      size={22}
+                      color="#888"
+                    />
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
 
@@ -187,9 +205,7 @@ export default function SignUpScreen() {
               {loading ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text className="text-white text-lg font-bold">
-                  Create Account
-                </Text>
+                <Text className="text-white text-lg font-bold">Create Account</Text>
               )}
             </TouchableOpacity>
 
@@ -209,34 +225,34 @@ export default function SignUpScreen() {
             {/* Divider */}
             <View className="flex-row items-center w-full py-6">
               <View className="flex-1 h-[1px] bg-white/10" />
-              <Text className="mx-4 text-gray-500 text-sm font-medium">
-                Or sign up with
-              </Text>
+              <Text className="mx-4 text-gray-500 text-sm font-medium">Or sign up with</Text>
               <View className="flex-1 h-[1px] bg-white/10" />
             </View>
 
-            {/* Social Login Buttons */}
+            {/* Social Login Buttons — Coming Soon */}
             <View className="w-full gap-3 mb-6">
-              {/* Google Button */}
               <TouchableOpacity
-                className="py-4 flex flex-row justify-center items-start rounded-xl bg-white/10 border border-white/10 px-5"
-                activeOpacity={0.8}
+                className="py-4 flex flex-row justify-center items-center rounded-xl bg-white/5 border border-white/10 px-5 opacity-60"
+                activeOpacity={0.6}
+                onPress={handleSocialComingSoon}
               >
                 <FontAwesome name="google" size={24} color="white" />
-                <Text className="text-white text-base font-bold ml-2">
-                  Continue with Google
-                </Text>
+                <Text className="text-white text-base font-bold ml-2">Continue with Google</Text>
+                <View className="ml-auto bg-white/10 px-2 py-0.5 rounded-full">
+                  <Text className="text-gray-500 text-xs font-medium">Soon</Text>
+                </View>
               </TouchableOpacity>
 
-              {/* Apple Button */}
               <TouchableOpacity
-                className="flex-row items-center justify-center rounded-xl bg-white py-4 px-5"
-                activeOpacity={0.8}
+                className="flex-row items-center justify-center rounded-xl bg-white/5 border border-white/10 py-4 px-5 opacity-60"
+                activeOpacity={0.6}
+                onPress={handleSocialComingSoon}
               >
                 <FontAwesome name="apple" size={24} color="#aaa" />
-                <Text className="text-black text-base font-bold ml-2">
-                  Continue with Apple
-                </Text>
+                <Text className="text-white text-base font-bold ml-2">Continue with Apple</Text>
+                <View className="ml-auto bg-white/10 px-2 py-0.5 rounded-full">
+                  <Text className="text-gray-500 text-xs font-medium">Soon</Text>
+                </View>
               </TouchableOpacity>
             </View>
 
@@ -244,11 +260,24 @@ export default function SignUpScreen() {
             <View className="items-center">
               <Text className="text-gray-500 text-xs text-center px-4">
                 By signing up, you agree to our{" "}
-                <Text className="text-gray-300 underline">
+                <Text
+                  className="text-gray-300 underline"
+                  onPress={() =>
+                    Alert.alert("Terms of Service", "Please visit thescene.app/terms to read our Terms of Service.")
+                  }
+                >
                   Terms of Service
                 </Text>{" "}
                 and{" "}
-                <Text className="text-gray-300 underline">Privacy Policy</Text>.
+                <Text
+                  className="text-gray-300 underline"
+                  onPress={() =>
+                    Alert.alert("Privacy Policy", "Please visit thescene.app/privacy to read our Privacy Policy.")
+                  }
+                >
+                  Privacy Policy
+                </Text>
+                .
               </Text>
             </View>
           </View>
@@ -259,13 +288,8 @@ export default function SignUpScreen() {
 }
 
 const styles = StyleSheet.create({
-  background: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    minHeight: "100%",
-  },
+  background: { flex: 1 },
+  scrollContent: { flexGrow: 1, minHeight: "100%" },
   primaryButton: {
     shadowColor: "#8c25f4",
     shadowOffset: { width: 0, height: 0 },
