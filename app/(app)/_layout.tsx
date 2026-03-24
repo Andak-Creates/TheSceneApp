@@ -1,8 +1,12 @@
+import { usePushNotifications } from "@/hooks/usePushNotifications";
+import { useUnreadNotifications } from "@/hooks/useUnreadNotifications";
 import { FontAwesome6, Ionicons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
 import { View } from "react-native";
 
 export default function AppLayout() {
+  usePushNotifications();
+  const { unreadCount } = useUnreadNotifications();
   return (
     <Tabs
       screenOptions={{
@@ -28,8 +32,14 @@ export default function AppLayout() {
           title: "Feed",
           tabBarIcon: ({ color, focused }) => (
             <View className="items-center">
-              <Ionicons name={focused ? "home" : "home-outline"} size={26} color={color} />
-              {focused && <View className="w-1.5 h-1.5 rounded-full bg-white mt-1.5 absolute -bottom-3" />}
+              <Ionicons
+                name={focused ? "home" : "home-outline"}
+                size={26}
+                color={color}
+              />
+              {focused && (
+                <View className="w-1.5 h-1.5 rounded-full bg-white mt-1.5 absolute -bottom-3" />
+              )}
             </View>
           ),
         }}
@@ -44,6 +54,21 @@ export default function AppLayout() {
 
       <Tabs.Screen
         name="settings/index"
+        options={{
+          href: null,
+        }}
+      />
+
+      <Tabs.Screen
+        name="settings/notifications"
+        options={{
+          href: null,
+         
+        }}
+      />
+
+      <Tabs.Screen
+        name="settings/support"
         options={{
           href: null,
         }}
@@ -70,7 +95,6 @@ export default function AppLayout() {
           href: null,
           tabBarStyle: { display: "none" },
         }}
-        
       />
 
       <Tabs.Screen
@@ -78,9 +102,7 @@ export default function AppLayout() {
         options={{
           title: "",
           tabBarIcon: () => (
-            <View
-              className="w-14 h-14 rounded-full bg-white items-center justify-center -mt-6 shadow-xl shadow-white/20 border-4 border-[#09030e]"
-            >
+            <View className="w-14 h-14 rounded-full bg-white items-center justify-center -mt-6 shadow-xl shadow-white/20 border-4 border-[#09030e]">
               <FontAwesome6 name="plus" size={20} color="#000" />
             </View>
           ),
@@ -110,8 +132,14 @@ export default function AppLayout() {
           title: "Profile",
           tabBarIcon: ({ color, focused }) => (
             <View className="items-center">
-              <Ionicons name={focused ? "person" : "person-outline"} size={26} color={color} />
-              {focused && <View className="w-1.5 h-1.5 rounded-full bg-white mt-1.5 absolute -bottom-3" />}
+              <Ionicons
+                name={focused ? "person" : "person-outline"}
+                size={26}
+                color={color}
+              />
+              {focused && (
+                <View className="w-1.5 h-1.5 rounded-full bg-white mt-1.5 absolute -bottom-3" />
+              )}
             </View>
           ),
         }}

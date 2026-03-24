@@ -15,8 +15,10 @@ import {
 import { supabase } from "../lib/supabase";
 import { useAuthStore } from "../stores/authStore";
 import { useUserStore } from "../stores/userStore";
+import HostProfileSelector from "../components/HostProfileSelector";
 
 type Tab = "parties" | "scanner" | "analytics";
+type FilterType = "all" | "owned" | "admin";
 
 interface Party {
   id: string;
@@ -37,6 +39,7 @@ interface PartyWithTiers extends Party {
   total_tickets: number;
   total_sold: number;
   total_revenue: number;
+  ownershipType: "owned" | "admin";
 }
 
 interface Analytics {
@@ -99,15 +102,20 @@ export default function HostDashboardScreen() {
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [isVerified, setIsVerified] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
   const scanLock = useRef(false);
+  const [showProfileSelector, setShowProfileSelector] = useState(false);
 
   // ✅ ADD PARTY SELECTION FOR SCANNER
   const [selectedPartyForScan, setSelectedPartyForScan] = useState<
     string | null
   >(null);
   const [showPartyPicker, setShowPartyPicker] = useState(false);
+
+  // ✅ ADD FILTERING STATE
+  const [filterType, setFilterType] = useState<FilterType>("all");
+  const [hasOwnedAndAdmin, setHasOwnedAndAdmin] = useState(false);
 
   useEffect(() => {
     fetchHostData();
@@ -128,10 +136,13 @@ export default function HostDashboardScreen() {
         .select("host_profile_id")
         .eq("user_id", user.id);
 
-      const profileIds = [
-        ...(ownedProfiles?.map(p => p.id) || []),
-        ...(adminProfiles?.map(p => p.host_profile_id) || [])
-      ];
+      const ownedIds = ownedProfiles?.map(p => p.id) || [];
+      const adminIds = adminProfiles?.map(p => p.host_profile_id) || [];
+      
+      const profileIds = [...ownedIds, ...adminIds];
+
+      // If user has both their own profile AND is an admin for someone else, show the filter
+      setHasOwnedAndAdmin(ownedIds.length > 0 && adminIds.length > 0);
 
       // fallback to legacy host_id if no profileIds found (for backward compatibility during migration)
       let partiesData = [];
@@ -172,70 +183,50 @@ export default function HostDashboardScreen() {
               0,
             ) || 0;
 
+          // Determine ownership type
+          let ownershipType: "owned" | "admin" = "owned";
+          if (party.host_profile_id) {
+            if (adminIds.includes(party.host_profile_id) && !ownedIds.includes(party.host_profile_id)) {
+              ownershipType = "admin";
+            }
+          } else if (party.host_id !== user.id) {
+            ownershipType = "admin";
+          }
+
           return {
             ...party,
             total_tickets: totalTickets,
             total_sold: totalSold,
             total_revenue: totalRevenue,
+            ownershipType,
           };
         }),
       );
 
       setParties(partiesWithTiers);
 
-      // ✅ CALCULATE ANALYTICS FROM TIER DATA
-      const totalRevenue = partiesWithTiers.reduce(
-        (sum, p) => sum + p.total_revenue,
-        0,
-      );
-      const totalTicketsSold = partiesWithTiers.reduce(
-        (sum, p) => sum + p.total_sold,
-        0,
-      );
-      const upcomingCount = partiesWithTiers.filter(
-        (p) => p.date_tba || new Date(p.date) >= new Date(),
-      ).length;
-
-      // Get reviews (aggregated for all parties this user manages)
-      const partyIds = partiesWithTiers.map(p => p.id);
-      let avgRating = 0;
-      if (partyIds.length > 0) {
-        const { data: reviews } = await supabase
-          .from("reviews")
-          .select("rating")
-          .in("party_id", partyIds);
-
-        avgRating =
-          reviews && reviews.length
-            ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
-            : 0;
-      }
-
-      setAnalytics({
-        totalRevenue,
-        totalTicketsSold,
-        totalParties: partiesWithTiers.length,
-        averageRating: avgRating,
-        upcomingParties: upcomingCount,
-      });
-
-      // ✅ FETCH BALANCE (Balance is still per-user for now, but linked to host earnings)
+      // ✅ FETCH BALANCE + verification status in one query
       const { data: balanceData } = await supabase
         .from("host_balances")
         .select("*")
         .eq("user_id", user.id)
         .single();
-      
+
       setBalance(balanceData || { total_earned: 0, total_withdrawn: 0, current_balance: 0, pending_payout: 0, currency: "NGN" });
 
-      // Fetch isAdmin status
+      // Fetch host verification status
       if (user) {
-        const { data: profile } = await supabase
+        const { data: profileRow } = await supabase
           .from("profiles")
-          .select("is_admin")
+          .select("host_verification_status, host_verified_at")
           .eq("id", user.id)
           .single();
-        if (profile) setIsAdmin(profile.is_admin);
+        if (profileRow) {
+          setIsVerified(
+            profileRow.host_verification_status === "approved" ||
+            !!profileRow.host_verified_at
+          );
+        }
       }
 
       // ✅ FETCH EARNINGS LOGS
@@ -266,92 +257,97 @@ export default function HostDashboardScreen() {
     }
   };
 
+  // ✅ DYNAMICALLY CALCULATE ANALYTICS BASED ON FILTER
+  useEffect(() => {
+    const computeAnalytics = async () => {
+      const filteredParties = parties.filter(p => filterType === "all" || p.ownershipType === filterType);
+      
+      const totalRevenue = filteredParties.reduce((sum, p) => sum + p.total_revenue, 0);
+      const totalTicketsSold = filteredParties.reduce((sum, p) => sum + p.total_sold, 0);
+      const upcomingCount = filteredParties.filter(p => p.date_tba || new Date(p.date) >= new Date()).length;
+
+      const partyIds = filteredParties.map(p => p.id);
+      let avgRating = 0;
+      if (partyIds.length > 0) {
+        const { data: reviews } = await supabase
+          .from("reviews")
+          .select("rating")
+          .in("party_id", partyIds);
+
+        avgRating = reviews && reviews.length ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length : 0;
+      }
+
+      setAnalytics({
+        totalRevenue,
+        totalTicketsSold,
+        totalParties: filteredParties.length,
+        averageRating: avgRating,
+        upcomingParties: upcomingCount,
+      });
+    };
+
+    if (!loading) {
+      computeAnalytics();
+    }
+  }, [parties, filterType, loading]);
+
   const handleWithdraw = async () => {
-    if (!balance || balance.current_balance <= 0) {
-      Alert.alert("Error", "You have no balance to withdraw.");
+    if (!user || !balance) return;
+    if (balance.current_balance <= 0) {
+      Alert.alert("No Balance", "You have no available balance to withdraw.");
       return;
     }
 
-    // Check host verification - unverified hosts cannot withdraw
-    const { data: profileRow } = await supabase
-      .from("profiles")
-      .select("host_verified_at, host_verification_status")
-      .eq("id", user?.id)
-      .single();
-
-    const isVerified = profileRow?.host_verified_at || profileRow?.host_verification_status === "approved";
-
-    if (!isVerified) {
-      const { data: verification } = await supabase
-        .from("host_verifications")
-        .select("status")
-        .eq("user_id", user?.id)
-        .maybeSingle();
-
-      if (verification?.status !== "approved") {
-        Alert.alert(
-          "Verification Required",
-          "You must complete host verification before withdrawing. Unverified hosts can withdraw only after their events and admin approval.",
-          [
-            { text: "OK", style: "cancel" },
-            { text: "Verify", onPress: () => router.push("/(app)/host-verification") },
-          ]
-        );
-        return;
-      }
-    }
-
-    // Check if bank account exists
+    // Check bank account exists
     const { data: bankAccount } = await supabase
       .from("host_bank_accounts")
       .select("id")
-      .eq("user_id", user?.id)
+      .eq("user_id", user.id)
       .eq("is_active", true)
       .maybeSingle();
 
     if (!bankAccount) {
       Alert.alert(
-        "Bank Detail Missing",
-        "Please add your bank account details first.",
+        "Bank Account Required",
+        "Please add your bank account details before withdrawing.",
         [
           { text: "Cancel", style: "cancel" },
-          { text: "Add Bank", onPress: () => router.push("/host/bank-account") }
+          { text: "Add Bank", onPress: () => router.push("/host/bank-account") },
         ]
       );
       return;
     }
 
     Alert.alert(
-      "Confirm Withdrawal",
-      `Are you sure you want to withdraw ${formatCurrency(balance.current_balance, balance.currency)}?`,
+      "Confirm Withdrawal Request",
+      `Request withdrawal of ${formatCurrency(balance.current_balance, balance.currency)}?\n\nThis will be reviewed by the team and processed within 1-2 business days.`,
       [
         { text: "Cancel", style: "cancel" },
-        { 
-          text: "Withdraw", 
+        {
+          text: "Submit Request",
           onPress: async () => {
             setWithdrawing(true);
             try {
               const { error } = await supabase
                 .from("withdrawal_requests")
                 .insert({
-                  host_id: user?.id,
+                  host_id: user.id,
                   bank_account_id: bankAccount.id,
                   amount: balance.current_balance,
                   currency: balance.currency,
-                  status: 'pending'
+                  status: "pending",
                 });
-
               if (error) throw error;
-              Alert.alert("Success", "Withdrawal request submitted for approval.");
+              Alert.alert("Request Submitted ✓", "Your withdrawal request has been submitted. We'll process it within 1-2 business days.");
               handleRefresh();
             } catch (err) {
               console.error("Withdrawal error:", err);
-              Alert.alert("Error", "Failed to submit withdrawal request.");
+              Alert.alert("Error", "Failed to submit withdrawal request. Please try again.");
             } finally {
               setWithdrawing(false);
             }
-          }
-        }
+          },
+        },
       ]
     );
   };
@@ -550,11 +546,66 @@ export default function HostDashboardScreen() {
     });
   };
 
+  const renderFilterControl = () => {
+    if (!hasOwnedAndAdmin) return null;
+
+    return (
+      <View className="px-6 mb-4 mt-2">
+        <View className="flex-row bg-white/5 rounded-full p-1 border border-white/5">
+          <TouchableOpacity
+            className={`flex-1 py-2 rounded-full items-center ${
+              filterType === "all" ? "bg-purple-600" : "bg-transparent"
+            }`}
+            onPress={() => setFilterType("all")}
+          >
+            <Text
+              className={`text-sm font-bold ${
+                filterType === "all" ? "text-white" : "text-gray-400"
+              }`}
+            >
+              All
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            className={`flex-1 py-2 rounded-full items-center ${
+              filterType === "owned" ? "bg-purple-600" : "bg-transparent"
+            }`}
+            onPress={() => setFilterType("owned")}
+          >
+            <Text
+              className={`text-sm font-bold ${
+                filterType === "owned" ? "text-white" : "text-gray-400"
+              }`}
+            >
+              My Brands
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            className={`flex-1 py-2 rounded-full items-center ${
+              filterType === "admin" ? "bg-purple-600" : "bg-transparent"
+            }`}
+            onPress={() => setFilterType("admin")}
+          >
+            <Text
+              className={`text-sm font-bold ${
+                filterType === "admin" ? "text-white" : "text-gray-400"
+              }`}
+            >
+              Admin For
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
   const renderPartiesTab = () => {
-    const upcomingParties = parties.filter(
+    const filteredParties = parties.filter(p => filterType === "all" || p.ownershipType === filterType);
+    
+    const upcomingParties = filteredParties.filter(
       (p) => p.date_tba || (p.date && new Date(p.date) >= new Date()),
     );
-    const pastParties = parties.filter(
+    const pastParties = filteredParties.filter(
       (p) => !p.date_tba && p.date && new Date(p.date) < new Date(),
     );
 
@@ -569,6 +620,8 @@ export default function HostDashboardScreen() {
           />
         }
       >
+        {renderFilterControl()}
+
         {/* Upcoming Parties */}
         <View className="px-6 py-4">
           <Text className="text-white text-lg font-bold mb-4">
@@ -901,81 +954,92 @@ export default function HostDashboardScreen() {
         />
       }
     >
+      {renderFilterControl()}
+
       <View className="px-6 py-6">
-        {/* ✅ BALANCE CARD */}
-        <View
-          className="bg-purple-600 rounded-3xl p-6 mb-6 shadow-lg shadow-purple-600/20"
-          style={{
-            shadowColor: "#8B5CF6",
-            shadowOffset: { width: 0, height: 10 },
-            shadowOpacity: 0.2,
-            shadowRadius: 20,
-            elevation: 10,
-          }}
-        >
-          <Text className="text-purple-200 text-sm font-semibold mb-1">
-            Available Balance
-          </Text>
-          <Text className="text-white text-4xl font-bold mb-4">
-            {balance ? formatCurrency(balance.current_balance, balance.currency) : "₦0"}
-          </Text>
-
-          {balance && balance.pending_payout > 0 && (
-            <View className="mb-4 bg-white/10 border border-white/20 rounded-xl p-3 flex-row items-center">
-              <Ionicons name="time" size={16} color="#fff" />
-              <Text className="text-white text-xs ml-2 font-medium">
-                Pending Payout: {formatCurrency(balance.pending_payout, balance.currency)}
-              </Text>
-            </View>
-          )}
-
-          <View className="flex-row gap-3">
-            <TouchableOpacity
-              onPress={handleWithdraw}
-              disabled={!balance || balance.current_balance <= 0 || withdrawing}
-              className={`flex-1 py-4 rounded-2xl items-center flex-row justify-center ${
-                !balance || balance.current_balance <= 0 || withdrawing
-                  ? "bg-white/10 opacity-50"
-                  : "bg-white"
-              }`}
-            >
-              {withdrawing ? (
-                <ActivityIndicator color="#8B5CF6" size="small" />
-              ) : (
-                <>
-                  <Ionicons name="wallet" size={20} color="#8B5CF6" />
-                  <Text className="text-purple-600 font-bold ml-2">Withdraw</Text>
-                </>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => router.push("/host/bank-account")}
-              className="bg-white/10 w-14 h-14 rounded-2xl items-center justify-center border border-white/20"
-            >
-              <Ionicons name="business" size={24} color="#fff" />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* ✅ ADMIN CONSOLE BUTTON (Only for Admins) */}
-        {isAdmin && (
-          <TouchableOpacity
-            onPress={() => router.push("/admin-console")}
-            className="mb-8 bg-red-500/10 border border-red-500/20 rounded-2xl p-4 flex-row justify-between items-center"
+        {/* ✅ BALANCE CARD - Hidden from non-host admins */}
+        {profile?.is_host && (
+          <View
+            className="bg-purple-600 rounded-3xl p-6 mb-6 shadow-lg shadow-purple-600/20"
+            style={{
+              shadowColor: "#8B5CF6",
+              shadowOffset: { width: 0, height: 10 },
+              shadowOpacity: 0.2,
+              shadowRadius: 20,
+              elevation: 10,
+            }}
           >
-            <View className="flex-row items-center">
-              <View className="bg-red-500/20 p-2 rounded-lg">
-                <Ionicons name="shield-checkmark" size={20} color="#ef4444" />
+            <Text className="text-purple-200 text-sm font-semibold mb-1">
+              Available Balance
+            </Text>
+            <Text className="text-white text-4xl font-bold mb-4">
+              {balance ? formatCurrency(balance.current_balance, balance.currency) : "₦0"}
+            </Text>
+
+            {balance && balance.pending_payout > 0 && (
+              <View className="mb-4 bg-white/10 border border-white/20 rounded-xl p-3 flex-row items-center">
+                <Ionicons name="time" size={16} color="#fff" />
+                <Text className="text-white text-xs ml-2 font-medium">
+                  Pending Payout: {formatCurrency(balance.pending_payout, balance.currency)}
+                </Text>
               </View>
-              <View className="ml-3">
-                <Text className="text-white font-bold">Admin Console</Text>
-                <Text className="text-gray-400 text-xs text-red-500/70">Manage Payouts & System</Text>
+            )}
+
+            {/* Unverified notice */}
+            {!isVerified && (
+              <View className="mb-3 bg-orange-500/10 border border-orange-500/20 rounded-xl px-4 py-3 flex-row items-center">
+                <Ionicons name="shield-outline" size={16} color="#f97316" />
+                <Text className="text-orange-400 text-xs ml-2 flex-1 leading-relaxed">
+                  Complete host verification to unlock withdrawals.
+                </Text>
+                <TouchableOpacity onPress={() => router.push("/(app)/host-verification")}>
+                  <Text className="text-orange-300 text-xs font-bold underline ml-2">Verify</Text>
+                </TouchableOpacity>
               </View>
+            )}
+
+            <View className="flex-row gap-3">
+              <TouchableOpacity
+                onPress={isVerified ? handleWithdraw : () => router.push("/(app)/host-verification")}
+                disabled={withdrawing || (isVerified && (!balance || balance.current_balance <= 0))}
+                className={`flex-1 py-4 rounded-2xl items-center flex-row justify-center ${
+                  !isVerified
+                    ? "bg-white/10 opacity-40"
+                    : !balance || balance.current_balance <= 0 || withdrawing
+                    ? "bg-white/10 opacity-50"
+                    : "bg-white"
+                }`}
+              >
+                {withdrawing ? (
+                  <ActivityIndicator color="#8B5CF6" size="small" />
+                ) : !isVerified ? (
+                  <>
+                    <Ionicons name="lock-closed" size={18} color="#aaa" />
+                    <Text className="text-gray-400 font-bold ml-2 text-sm">Verify to Withdraw</Text>
+                  </>
+                ) : !balance || balance.current_balance <= 0 ? (
+                  <>
+                    <Ionicons name="wallet-outline" size={18} color="#aaa" />
+                    <Text className="text-gray-400 font-bold ml-2">No Balance</Text>
+                  </>
+                ) : (
+                  <>
+                    <Ionicons name="wallet" size={20} color="#8B5CF6" />
+                    <Text className="text-purple-600 font-bold ml-2">Withdraw</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => router.push("/host/bank-account")}
+                className="bg-white/10 w-14 h-14 rounded-2xl items-center justify-center border border-white/20"
+              >
+                <Ionicons name="business" size={24} color="#fff" />
+              </TouchableOpacity>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="#ef4444" />
-          </TouchableOpacity>
+          </View>
         )}
+
 
         {/* Stats Row */}
         <View className="flex-row gap-4 mb-8">
@@ -1049,52 +1113,53 @@ export default function HostDashboardScreen() {
           Quick Actions
         </Text>
 
-        <TouchableOpacity
-          className="bg-white/5 rounded-2xl p-4 flex-row items-center justify-between mb-3"
-          onPress={() => router.push("/(app)/host-profile-setup")}
-        >
-          <View className="flex-row items-center">
-            <Ionicons name="business" size={24} color="#8B5CF6" />
-            <Text className="text-white font-semibold ml-3">Manage Host Profiles</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color="#666" />
-        </TouchableOpacity>
+        {profile?.is_host && (
+          <TouchableOpacity
+            className="bg-white/5 rounded-2xl p-4 flex-row items-center justify-between mb-3"
+            onPress={() => router.push("/(app)/host-profile-setup")}
+          >
+            <View className="flex-row items-center">
+              <Ionicons name="business" size={24} color="#8B5CF6" />
+              <Text className="text-white font-semibold ml-3">Manage Host Profiles</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#666" />
+          </TouchableOpacity>
+        )}
 
-        <TouchableOpacity
-          className="bg-white/5 rounded-2xl p-4 flex-row items-center justify-between mb-3"
-          onPress={() => {
-            if (activeTab === "scanner" && selectedPartyForScan) {
-              const party = parties.find(p => p.id === selectedPartyForScan);
-              if (party?.host_profile_id) {
+        {profile?.is_host && (
+          <TouchableOpacity
+            className="bg-white/5 rounded-2xl p-4 flex-row items-center justify-between mb-3"
+            onPress={async () => {
+              const { data } = await supabase
+                .from("host_profiles")
+                .select("id")
+                .eq("owner_id", user?.id)
+                .is("deletion_requested_at", null);
+
+              if (!data || data.length === 0) {
+                Alert.alert(
+                  "No Profile",
+                  "Please create a host profile first to manage admins."
+                );
+              } else if (data.length === 1) {
+                // Only 1 profile, go straight to it
                 router.push({
                   pathname: "/(app)/host-profile-admins",
-                  params: { hostProfileId: party.host_profile_id }
+                  params: { hostProfileId: data[0].id },
                 } as any);
               } else {
-                Alert.alert("Note", "Please select a party first or ensure the party has a host profile.");
+                // Multiple profiles, show selector
+                setShowProfileSelector(true);
               }
-            } else if (parties.length > 0) {
-              // Just pick the first one's profile if it exists
-              const party = parties.find(p => p.host_profile_id);
-              if (party?.host_profile_id) {
-                router.push({
-                  pathname: "/(app)/host-profile-admins",
-                  params: { hostProfileId: party.host_profile_id }
-                } as any);
-              } else {
-                Alert.alert("Note", "No host profile found to manage.");
-              }
-            } else {
-              Alert.alert("Note", "You haven't created any parties yet.");
-            }
-          }}
-        >
-          <View className="flex-row items-center">
-            <Ionicons name="people-circle" size={24} color="#8B5CF6" />
-            <Text className="text-white font-semibold ml-3">Manage Admins</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color="#666" />
-        </TouchableOpacity>
+            }}
+          >
+            <View className="flex-row items-center">
+              <Ionicons name="people-circle" size={24} color="#8B5CF6" />
+              <Text className="text-white font-semibold ml-3">Manage Admins</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#666" />
+          </TouchableOpacity>
+        )}
 
         <TouchableOpacity
           className="bg-white/5 rounded-2xl p-4 flex-row items-center justify-between"
@@ -1181,6 +1246,17 @@ export default function HostDashboardScreen() {
       {activeTab === "parties" && renderPartiesTab()}
       {activeTab === "scanner" && renderScannerTab()}
       {activeTab === "analytics" && renderAnalyticsTab()}
+
+      <HostProfileSelector
+        isVisible={showProfileSelector}
+        onClose={() => setShowProfileSelector(false)}
+        onSelect={(profileId: string) => {
+          router.push({
+            pathname: "/(app)/host-profile-admins",
+            params: { hostProfileId: profileId },
+          } as any);
+        }}
+      />
     </View>
   );
 }

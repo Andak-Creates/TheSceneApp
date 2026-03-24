@@ -1,7 +1,5 @@
 import { Session, User } from "@supabase/supabase-js";
 import { create } from "zustand";
-import { detectAndSaveRegionCurrency } from "../lib/currency";
-import { detectAndSaveUserLocation } from "../lib/location";
 import { supabase } from "../lib/supabase";
 
 interface AuthState {
@@ -72,12 +70,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (error) return { error };
       if (!data.user) return { error: new Error("No user returned") };
 
-      // Detect and save region currency and location
-      await Promise.all([
-        detectAndSaveRegionCurrency(data.user.id),
-        detectAndSaveUserLocation(data.user.id),
-      ]);
-
+      // NOTE: Do NOT write to user_preferences here.
+      // The profiles row is created via a DB trigger that may not have
+      // completed yet, causing FK violations. Preferences are set
+      // during onboarding and updated from _layout after profile is confirmed.
       return { error: null };
     } catch (error) {
       return { error };
@@ -92,13 +88,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       });
 
       if (error) return { error };
-      if (data.user) {
-        await Promise.all([
-          detectAndSaveRegionCurrency(data.user.id),
-          detectAndSaveUserLocation(data.user.id),
-        ]);
-      }
 
+      // NOTE: Do NOT overwrite user location/currency on every sign-in.
+      // This would silently clobber preferences the user set during onboarding.
+      // Currency is updated once from _layout after profile load.
       return { error: null };
     } catch (error) {
       return { error };

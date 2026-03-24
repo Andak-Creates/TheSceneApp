@@ -1,3 +1,4 @@
+import AttendancePill from "@/components/AttendancePill";
 import { useAudioStore } from "@/stores/audioStore";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -13,6 +14,7 @@ import {
   View,
 } from "react-native";
 import MediaGalleryViewer from "../../components/MediaGalleryViewer";
+import { useUnreadNotifications } from "../../hooks/useUnreadNotifications";
 import { getCurrencySymbol } from "../../lib/currency";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "../../stores/authStore";
@@ -26,6 +28,8 @@ interface Party {
   end_date: string | null;
   location: string | null;
   city: string | null;
+  state: string | null;
+  country: string | null;
   ticket_price: number | null;
   ticket_quantity: number;
   tickets_sold: number;
@@ -34,7 +38,6 @@ interface Party {
   currency_code?: string;
   host_id: string;
   created_at: string;
-  // TBA
   date_tba?: boolean;
   location_tba?: boolean;
   ticket_price_tba?: boolean;
@@ -48,6 +51,7 @@ interface Party {
     id: string;
     name: string;
     avatar_url: string | null;
+    is_verified: boolean;
   };
   media?: {
     id: string;
@@ -67,6 +71,7 @@ interface Party {
 export default function FeedScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
+  const { unreadCount } = useUnreadNotifications();
 
   const [parties, setParties] = useState<Party[]>([]);
   const [loading, setLoading] = useState(true);
@@ -88,149 +93,148 @@ export default function FeedScreen() {
 
   const fetchParties = async () => {
     try {
-      // Fetch parties with host info and media
-      const { data: partiesData, error: partiesError } = await supabase
-        .from("parties")
-        .select(
-          `
-        *,
-        host:profiles!host_id (
-          id,
-          username,
-          avatar_url,
-          is_host
-        ),
-        host_profile:host_profiles!host_profile_id (
-          id,
-          name,
-          avatar_url
-        ),
-        media:party_media(*)
-      `,
-        )
-        .eq("is_published", true)
-        .order("created_at", { ascending: false })
-        .limit(50); // Fetch more since we'll filter
-
-      if (partiesError) throw partiesError;
-
-      // Fetch user preferences for location-based sorting
+      // Fetch user preferences for location filtering
+      let userState = "";
+      let userCountry = "";
       let userCity = "";
       if (user) {
         const { data: prefs } = await supabase
           .from("user_preferences")
-          .select("city")
+          .select("city, state, country")
           .eq("user_id", user.id)
           .maybeSingle();
+        userState = (prefs?.state || "").toLowerCase();
+        userCountry = (prefs?.country || "").toLowerCase();
         userCity = (prefs?.city || "").toLowerCase();
       }
 
-      // ✅ FILTER OUT ENDED PARTIES
+      // Build location-filtered query
+      let query = supabase
+        .from("parties")
+        .select(
+          `
+          *,
+          host:profiles!host_id (
+            id,
+            username,
+            avatar_url,
+            is_host
+          ),
+          host_profile:host_profiles!host_profile_id (
+            id,
+            name,
+            avatar_url,
+            is_verified
+          ),
+          media:party_media(*)
+        `,
+        )
+        .eq("is_published", true)
+        .order("created_at", { ascending: false })
+        .limit(50);
+
+      // Filter by state first, fall back to country
+      if (userState || userCity) {
+        query = query.or(`state.ilike.%${userState}%,city.ilike.%${userCity}%`);
+      } else if (userCountry) {
+        query = query.ilike("country", `%${userCountry}%`);
+      }
+
+      const { data: partiesData, error: partiesError } = await query;
+      if (partiesError) throw partiesError;
+
+      // Filter out ended parties
       const now = new Date();
       const activeParties = (partiesData || []).filter((party) => {
-        // If date is TBA, show it
         if (party.date_tba) return true;
-
-        // If end_date exists, check it
-        if (party.end_date) {
-          return new Date(party.end_date) > now;
-        }
-
-        // If no end_date, check the start date
+        if (party.end_date) return new Date(party.end_date) > now;
         if (party.date) {
-          // Assume party ends 12 hours after start if no end_date specified
           const startDate = new Date(party.date);
           const twelveHoursAgo = new Date(now.getTime() - 12 * 60 * 60 * 1000);
           return startDate > twelveHoursAgo;
         }
-
-        return true; // Fallback
+        return true;
       });
 
-      // Fetch engagement counts for each party
-      const partiesWithEngagement = await Promise.all(
-        activeParties.map(async (party) => {
-          // Get likes count
-          const { count: likesCount } = await supabase
-            .from("party_likes")
-            .select("*", { count: "exact", head: true })
-            .eq("party_id", party.id);
+      if (activeParties.length === 0) {
+        setParties([]);
+        return;
+      }
 
-          // Get comments count
-          const { count: commentsCount } = await supabase
-            .from("party_comments")
-            .select("*", { count: "exact", head: true })
-            .eq("party_id", party.id);
+      const partyIds = activeParties.map((p) => p.id);
 
-          // Check if current user liked and reposted this party
-          let isLiked = false;
-          let isReposted = false;
-          if (user) {
-            const [likeRes, repostRes] = await Promise.all([
-              supabase
-                .from("party_likes")
-                .select("id")
-                .eq("party_id", party.id)
-                .eq("user_id", user.id)
-                .single(),
-              supabase
-                .from("party_reposts")
-                .select("id")
-                .eq("party_id", party.id)
-                .eq("user_id", user.id)
-                .single(),
-            ]);
-            isLiked = !!likeRes.data;
-            isReposted = !!repostRes.data;
-          }
+      // --- Batched engagement queries (5 total, not 5 × N) ---
+      const [
+        likesCountRes,
+        commentsCountRes,
+        repostsCountRes,
+        userLikesRes,
+        userRepostsRes,
+      ] = await Promise.all([
+        supabase
+          .from("party_likes")
+          .select("party_id")
+          .in("party_id", partyIds),
+        supabase
+          .from("party_comments")
+          .select("party_id")
+          .in("party_id", partyIds),
+        supabase
+          .from("party_reposts")
+          .select("party_id")
+          .in("party_id", partyIds),
+        user
+          ? supabase
+              .from("party_likes")
+              .select("party_id")
+              .in("party_id", partyIds)
+              .eq("user_id", user.id)
+          : Promise.resolve({ data: [] }),
+        user
+          ? supabase
+              .from("party_reposts")
+              .select("party_id")
+              .in("party_id", partyIds)
+              .eq("user_id", user.id)
+          : Promise.resolve({ data: [] }),
+      ]);
 
-          // Get reposts count
-          const { count: repostsCount } = await supabase
-            .from("party_reposts")
-            .select("*", { count: "exact", head: true })
-            .eq("party_id", party.id);
+      // Build fast lookup maps
+      const likesCountMap: Record<string, number> = {};
+      const commentsCountMap: Record<string, number> = {};
+      const repostsCountMap: Record<string, number> = {};
+      const likedSet = new Set<string>();
+      const repostedSet = new Set<string>();
 
-          // Sort media: primary first, then by display_order
-          if (party.media && Array.isArray(party.media)) {
-            // Filter out non-http(s) urls (broken legacy local paths)
-            party.media = party.media.filter(
-              (m: any) =>
-                m.media_url &&
-                (m.media_url.startsWith("http") ||
-                  m.media_url.startsWith("https")),
-            );
+      for (const r of likesCountRes.data || []) likesCountMap[r.party_id] = (likesCountMap[r.party_id] || 0) + 1;
+      for (const r of commentsCountRes.data || []) commentsCountMap[r.party_id] = (commentsCountMap[r.party_id] || 0) + 1;
+      for (const r of repostsCountRes.data || []) repostsCountMap[r.party_id] = (repostsCountMap[r.party_id] || 0) + 1;
+      for (const r of userLikesRes.data || []) likedSet.add(r.party_id);
+      for (const r of userRepostsRes.data || []) repostedSet.add(r.party_id);
 
-            party.media.sort((a: any, b: any) => {
-              if (a.is_primary) return -1;
-              if (b.is_primary) return 1;
-              return (a.display_order || 0) - (b.display_order || 0);
-            });
-          }
-
-          return {
-            ...party,
-            likes_count: likesCount || 0,
-            comments_count: commentsCount || 0,
-            is_liked: isLiked,
-            reposts_count: repostsCount || 0,
-            is_reposted: isReposted,
-          };
-        }),
-      );
-
-      // Sort by location: same city first, then same country, then by date
-      partiesWithEngagement.sort((a, b) => {
-        const aCity = (a.city || "").toLowerCase();
-        const bCity = (b.city || "").toLowerCase();
-        const aMatchesCity =
-          userCity && (aCity.includes(userCity) || userCity.includes(aCity));
-        const bMatchesCity =
-          userCity && (bCity.includes(userCity) || userCity.includes(bCity));
-        if (aMatchesCity && !bMatchesCity) return -1;
-        if (!aMatchesCity && bMatchesCity) return 1;
-        return (
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
+      // Merge into party objects
+      const partiesWithEngagement = activeParties.map((party) => {
+        if (party.media && Array.isArray(party.media)) {
+          party.media = party.media.filter(
+            (m: any) =>
+              m.media_url &&
+              (m.media_url.startsWith("http") ||
+                m.media_url.startsWith("https")),
+          );
+          party.media.sort((a: any, b: any) => {
+            if (a.is_primary) return -1;
+            if (b.is_primary) return 1;
+            return (a.display_order || 0) - (b.display_order || 0);
+          });
+        }
+        return {
+          ...party,
+          likes_count: likesCountMap[party.id] || 0,
+          comments_count: commentsCountMap[party.id] || 0,
+          reposts_count: repostsCountMap[party.id] || 0,
+          is_liked: likedSet.has(party.id),
+          is_reposted: repostedSet.has(party.id),
+        };
       });
 
       setParties(partiesWithEngagement);
@@ -249,13 +253,9 @@ export default function FeedScreen() {
 
   const handleLike = async (partyId: string) => {
     if (!user) return;
-
     const party = parties.find((p) => p.id === partyId);
     if (!party) return;
-
     const wasLiked = party.is_liked;
-
-    // Optimistic update
     setParties(
       parties.map((p) =>
         p.id === partyId
@@ -267,25 +267,20 @@ export default function FeedScreen() {
           : p,
       ),
     );
-
     try {
       if (wasLiked) {
-        // Unlike
         await supabase
           .from("party_likes")
           .delete()
           .eq("party_id", partyId)
           .eq("user_id", user.id);
       } else {
-        // Like
-        await supabase.from("party_likes").insert({
-          party_id: partyId,
-          user_id: user.id,
-        });
+        await supabase
+          .from("party_likes")
+          .insert({ party_id: partyId, user_id: user.id });
       }
     } catch (error) {
       console.error("Error toggling like:", error);
-      // Revert on error
       setParties(
         parties.map((p) =>
           p.id === partyId
@@ -346,12 +341,11 @@ export default function FeedScreen() {
   const formatDate = (dateString: string | null) => {
     if (!dateString) return "Date TBA";
     const date = new Date(dateString);
-    const options: Intl.DateTimeFormatOptions = {
+    return date.toLocaleDateString("en-US", {
       weekday: "short",
       month: "short",
       day: "numeric",
-    };
-    return date.toLocaleDateString("en-US", options);
+    });
   };
 
   const formatTime = (dateString: string | null) => {
@@ -366,15 +360,6 @@ export default function FeedScreen() {
   };
 
   const renderPartyCard = ({ item: party }: { item: Party }) => {
-    // Determine image source: party_media (primary or first) -> flyer_url -> placeholder
-    let imageSource = null;
-    if (party.media && party.media.length > 0) {
-      const primary = party.media.find((m: any) => m.is_primary);
-      imageSource = primary ? primary.media_url : party.media[0].media_url;
-    } else {
-      imageSource = party.flyer_url;
-    }
-
     return (
       <View className="pb-2">
         {/* Host Header */}
@@ -401,9 +386,14 @@ export default function FeedScreen() {
             </View>
           )}
           <View className="ml-3 flex-1">
-            <Text className="text-white font-extrabold text-base tracking-tight">
-              {party.host_profile?.name || "Unknown Brand"}
-            </Text>
+            <View className="flex-row items-center gap-1">
+              <Text className="text-white font-extrabold text-base tracking-tight">
+                {party.host_profile?.name || "Unknown Brand"}
+              </Text>
+              {party.host_profile?.is_verified && (
+                <Ionicons name="checkmark-circle" size={16} color="#a855f7" />
+              )}
+            </View>
             <Text className="text-gray-500 text-xs">
               {formatDate(party.created_at)}
             </Text>
@@ -509,6 +499,12 @@ export default function FeedScreen() {
 
         {/* Party Info */}
         <View className="px-5 pb-4">
+
+          <View className="flex-row items-center gap-2 mb-2">
+  <AttendancePill ticketsSold={party.tickets_sold} />
+</View>
+
+
           <Text className="text-white text-xl font-extrabold mb-1.5 leading-tight">
             {party.title}
           </Text>
@@ -540,7 +536,6 @@ export default function FeedScreen() {
             </Text>
           </View>
 
-          {/* Music Genres */}
           <View className="flex-row flex-wrap gap-2 mb-4">
             {party.music_genres.slice(0, 3).map((genre) => (
               <View
@@ -554,7 +549,6 @@ export default function FeedScreen() {
             ))}
           </View>
 
-          {/* Get Tickets Button */}
           <TouchableOpacity
             className="py-3.5 rounded-2xl items-center bg-white mt-1 shadow-lg shadow-white/10"
             activeOpacity={0.8}
@@ -586,25 +580,42 @@ export default function FeedScreen() {
 
   return (
     <View className="flex-1 bg-[#09030e]">
-      {/* Header */}
       <View className="pt-16 pb-4 px-6 flex-row justify-between items-center">
-        <View>
-          <Text className="text-white text-3xl font-extrabold tracking-tight">
-            Discover
-          </Text>
-          <Text className="text-gray-400 text-sm mt-1">
-            Find your next experience
+  <View>
+    <Text className="text-white text-3xl font-extrabold tracking-tight">
+      Discover
+    </Text>
+    <Text className="text-gray-400 text-sm mt-1">
+      Find your next experience
+    </Text>
+  </View>
+
+  <View className="flex-row items-center gap-3">
+    {/* Bell icon with unread badge */}
+    <TouchableOpacity
+      onPress={() => router.push("/settings/notifications")}
+      className="bg-white/5 p-3 rounded-full border border-white/10 relative"
+    >
+      <Ionicons name="notifications-outline" size={22} color="#a855f7" />
+      {unreadCount > 0 && (
+        <View className="absolute -top-1 -right-1 bg-red-500 rounded-full min-w-[18px] h-[18px] items-center justify-center border-2 border-[#09030e] px-1">
+          <Text className="text-white text-[10px] font-bold">
+            {unreadCount > 99 ? "99+" : unreadCount}
           </Text>
         </View>
-        <TouchableOpacity
-          onPress={() => router.push("/(app)/search")}
-          className="bg-white/5 p-3 rounded-full border border-white/10"
-        >
-          <Ionicons name="search" size={24} color="#a855f7" />
-        </TouchableOpacity>
-      </View>
+      )}
+    </TouchableOpacity>
 
-      {/* Parties List */}
+    {/* Search icon */}
+    <TouchableOpacity
+      onPress={() => router.push("/(app)/search")}
+      className="bg-white/5 p-3 rounded-full border border-white/10"
+    >
+      <Ionicons name="search" size={22} color="#a855f7" />
+    </TouchableOpacity>
+  </View>
+</View>
+
       <FlatList
         data={parties}
         renderItem={({ item }) => (
@@ -627,15 +638,15 @@ export default function FeedScreen() {
           />
         }
         ListEmptyComponent={
-          <View className=" items-center justify-center py-32">
+          <View className="items-center justify-center py-32">
             <View className="w-20 h-20 rounded-full bg-[#150d1e] items-center justify-center mb-6 border border-white/5">
               <Ionicons name="calendar-outline" size={32} color="#a855f7" />
             </View>
             <Text className="text-gray-200 text-xl font-bold mb-2">
-              No parties yet
+              No parties near you yet
             </Text>
             <Text className="text-gray-500 text-center max-w-[80%]">
-              Come back later or be the first to create one!
+              We're just getting started in your area. Check back soon, or update your location in Settings.
             </Text>
           </View>
         }

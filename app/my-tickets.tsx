@@ -1,9 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image as ExpoImage } from "expo-image";
+import * as Print from "expo-print";
 import { useRouter } from "expo-router";
+import * as Sharing from "expo-sharing";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   RefreshControl,
   Text,
@@ -24,6 +27,9 @@ interface Ticket {
   purchased_at: string;
   quantity_purchased: number;
   quantity_used: number;
+  tier?: {
+    name: string;
+  };
   party: {
     id: string;
     title: string;
@@ -64,6 +70,7 @@ export default function MyTicketsScreen() {
         .select(
           `
           *,
+          tier:ticket_tiers (name),
           party:parties (
             id,
             title,
@@ -131,6 +138,258 @@ export default function MyTicketsScreen() {
   const currentTickets =
     activeTab === "upcoming" ? upcomingTickets : pastTickets;
 
+  const captureAndShare = async (ticket: Ticket) => {
+    try {
+      const qrData = encodeURIComponent(
+        JSON.stringify({
+          ticketId: ticket.id,
+          partyId: ticket.party_id,
+          userId: user?.id,
+        })
+      );
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${qrData}`;
+
+      const dateStr = ticket.party.date_tba
+        ? "Date TBA"
+        : `${formatDate(ticket.party.date)} • ${formatTime(ticket.party.date)}`;
+
+      const locationStr = ticket.party.location_tba
+        ? "Location TBA"
+        : `${ticket.party.location}, ${ticket.party.city}`;
+
+      const ticketHtml = `
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background-color: #f3f4f6;
+        color: #111827;
+        margin: 0;
+        padding: 40px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+      }
+      .ticket-container {
+        max-width: 550px;
+        width: 100%;
+        background-color: #ffffff;
+        border-radius: 32px;
+        padding: 0;
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+        overflow: hidden;
+        position: relative;
+        border: 1px solid #e5e7eb;
+      }
+      .flare-strip {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 12px;
+        background: linear-gradient(to bottom, #9333ea, #7c3aed);
+      }
+      .watermark1 {
+        position: absolute;
+        top: -20px;
+        right: -30px;
+        transform: rotate(15deg);
+        font-size: 180px;
+        opacity: 0.04;
+        pointer-events: none;
+        z-index: 0;
+      }
+      .watermark2 {
+        position: absolute;
+        bottom: 15%;
+        left: -40px;
+        transform: rotate(-10deg);
+        font-size: 220px;
+        opacity: 0.05;
+        pointer-events: none;
+        z-index: 0;
+      }
+      .watermark3 {
+        position: absolute;
+        top: 45%;
+        right: -50px;
+        transform: rotate(25deg);
+        font-size: 160px;
+        opacity: 0.08;
+        pointer-events: none;
+        z-index: 0;
+      }
+      .header-section {
+        background: linear-gradient(135deg, #9333ea 0%, #7c3aed 100%);
+        padding: 25px 40px;
+        text-align: center;
+        color: white;
+        position: relative;
+        z-index: 1;
+        margin-left: 12px;
+      }
+      .tier-badge {
+        display: inline-block;
+        background: rgba(255, 255, 255, 0.25);
+        padding: 8px 20px;
+        border-radius: 100px;
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+        backdrop-filter: blur(8px);
+        border: 1px solid rgba(255,255,255,0.3);
+      }
+      .title {
+        font-size: 36px;
+        font-weight: 900;
+        margin-bottom: 10px;
+        line-height: 1.1;
+        letter-spacing: -0.5px;
+      }
+      .host {
+        font-size: 18px;
+        opacity: 0.95;
+        font-weight: 500;
+      }
+      .main-content {
+        padding: 0px 40px;
+        text-align: center;
+        position: relative;
+        z-index: 1;
+        margin-left: 12px;
+      }
+      .qr-wrapper {
+        background: white;
+        padding: 25px;
+        border-radius: 28px;
+        display: inline-block;
+        box-shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.1);
+        margin-bottom: 40px;
+        border: 2px solid #f3f4f6;
+      }
+      .info-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 30px;
+        text-align: left;
+        margin-top: 25px;
+        padding-top: 35px;
+        border-top: 3px dashed #e5e7eb;
+      }
+      .info-item .label {
+        font-size: 12px;
+        text-transform: uppercase;
+        color: #4b5563; /* Darker gray for better contrast */
+        letter-spacing: 1px;
+        font-weight: 800;
+        margin-bottom: 6px;
+      }
+      .info-item .value {
+        font-size: 16px;
+        color: #111827; /* Dark black */
+        font-weight: 700;
+      }
+      .footer-strip {
+        background: #f9fafb;
+        padding: 20px 40px;
+        text-align: center;
+        font-size: 12px;
+        color: #374151; /* Much darker gray for readability */
+        border-top: 1px solid #e5e7eb;
+        margin-left: 12px;
+        font-weight: 500;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="ticket-container">
+      <div class="flare-strip"></div>
+      <div class="watermark1">🌺</div>
+      <div class="watermark2">🌺</div>
+      <div class="watermark3">🌺</div>
+      
+      <div class="header-section">
+        <div class="tier-badge">${ticket.tier?.name || "General Admission"}</div>
+        <div class="title">${ticket.party.title}</div>
+        <div class="host">Hosted by ${ticket.party.host.username}</div>
+      </div>
+      
+      <div class="main-content">
+        <div class="qr-wrapper">
+          <img src="${qrUrl}" width="320" height="320" />
+        </div>
+        
+        <div class="info-grid">
+          <div class="info-item">
+            <div class="label">Date & Time</div>
+            <div class="value">${dateStr}</div>
+          </div>
+          <div class="info-item">
+            <div class="label">Location</div>
+            <div class="value">${locationStr}</div>
+          </div>
+          <div class="info-item">
+            <div class="label">Ticket ID</div>
+            <div class="value" style="font-family: monospace; font-size: 14px;">#${ticket.id.slice(0, 8).toUpperCase()}</div>
+          </div>
+          <div class="info-item">
+            <div class="label">Purchased On</div>
+            <div class="value">${formatDate(ticket.purchased_at)}</div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="footer-strip">
+        Please present this ticket at the entrance. Each QR code is valid for ${ticket.quantity_purchased} person(s).
+      </div>
+    </div>
+  </body>
+</html>
+      `;
+
+
+      const { uri } = await Print.printToFileAsync({
+        html: ticketHtml,
+        base64: false,
+      });
+
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (isAvailable) {
+        await Sharing.shareAsync(uri, {
+          mimeType: "application/pdf",
+          dialogTitle: "Share Ticket",
+          UTI: "com.adobe.pdf",
+        });
+      } else {
+        Alert.alert("Error", "Sharing is not available on this device.");
+      }
+    } catch (error) {
+      console.error("Error sharing ticket:", error);
+      Alert.alert("Error", "Failed to share ticket.");
+    }
+  };
+
+  const handleShareTicket = (ticket: Ticket) => {
+    if (ticket.quantity_purchased > 1) {
+      Alert.alert(
+        "Warning",
+        "Only share with trusted people. This QR code is not unique per person, if someone else uses it before you, you could lose access to the event.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Proceed", onPress: () => captureAndShare(ticket) },
+        ]
+      );
+    } else {
+      captureAndShare(ticket);
+    }
+  };
+
   const renderTicketCard = ({ item: ticket }: { item: Ticket }) => {
     const isExpanded = expandedTicket === ticket.id;
     const isPast =
@@ -166,7 +425,7 @@ export default function MyTicketsScreen() {
                 {ticket.party.title}
               </Text>
               <Text className="text-gray-400 text-sm mb-2">
-                by {ticket.party.host.username}
+                by {ticket.party.host.username} • {ticket.tier?.name || "General"}
               </Text>
 
               <View className="flex-row items-center mb-1">
@@ -231,7 +490,7 @@ export default function MyTicketsScreen() {
 
         {/* Expanded Content */}
         {isExpanded && (
-          <View className="border-t border-white/10 p-4">
+          <View className="border-t border-white/10 p-4 bg-[#191022]">
             {/* QR Code */}
             <View className="items-center py-6 mb-4">
               <View className="bg-white p-4 rounded-2xl">
@@ -254,6 +513,13 @@ export default function MyTicketsScreen() {
             {/* Ticket Details */}
             <View className="bg-white/5 rounded-xl p-4 mb-4">
               <Text className="text-white font-bold mb-3">Ticket Details</Text>
+
+              <View className="flex-row justify-between mb-2">
+                <Text className="text-gray-400 text-sm">Ticket Tier</Text>
+                <Text className="text-white text-sm font-bold">
+                  {ticket.tier?.name || "General Admission"}
+                </Text>
+              </View>
 
               <View className="flex-row justify-between mb-2">
                 <Text className="text-gray-400 text-sm">Ticket ID</Text>
@@ -325,7 +591,10 @@ export default function MyTicketsScreen() {
                 <Text className="text-white font-semibold">View Party</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity className="flex-1 bg-white/10 py-3 rounded-xl items-center">
+              <TouchableOpacity 
+                className="flex-1 bg-white/10 py-3 rounded-xl items-center"
+                onPress={() => handleShareTicket(ticket)}
+              >
                 <Text className="text-white font-semibold">Share Ticket</Text>
               </TouchableOpacity>
             </View>

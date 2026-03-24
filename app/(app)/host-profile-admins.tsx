@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { supabase } from "../../lib/supabase";
+import { sendPush } from "../../lib/sendPush";
 import { useAuthStore } from "../../stores/authStore";
 
 interface Admin {
@@ -37,9 +38,21 @@ export default function HostProfileAdminsScreen() {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [hostProfileName, setHostProfileName] = useState("");
 
   useEffect(() => {
     fetchAdmins();
+    // Fetch the host profile name for use in notifications
+    const fetchProfileName = async () => {
+      if (!hostProfileId) return;
+      const { data } = await supabase
+        .from("host_profiles")
+        .select("name")
+        .eq("id", hostProfileId)
+        .single();
+      if (data?.name) setHostProfileName(data.name);
+    };
+    fetchProfileName();
   }, [hostProfileId]);
 
   useEffect(() => {
@@ -111,9 +124,28 @@ export default function HostProfileAdminsScreen() {
         return;
       }
 
+      // Notify the newly added admin via push notification
+      const profileLabel = hostProfileName || "a host profile";
+      sendPush(
+        userId,
+        "You've been added as an admin 🎉",
+        `You can now scan tickets and manage parties for ${profileLabel}.`,
+        { type: "host_admin_added", host_profile_id: hostProfileId }
+      );
+
+      // Also insert an in-app notification so it shows in their notifications list
+      await supabase.from("notifications").insert({
+        user_id: userId,
+        title: "You've been added as an admin 🎉",
+        body: `You can now scan tickets and manage parties for ${profileLabel}.`,
+        type: "general",
+        data: { type: "host_admin_added", host_profile_id: hostProfileId },
+        is_read: false,
+      });
+
       setSearchUsername("");
       setSearchResults([]);
-      Alert.alert("Success", `added @${username} as admin`);
+      Alert.alert("Success", `Added @${username} as admin`);
       fetchAdmins();
     } catch (err: any) {
       console.error("Error adding admin:", err);

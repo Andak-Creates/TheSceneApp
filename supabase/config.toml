@@ -1,0 +1,11 @@
+[functions.send-new-party-notification]
+verify_jwt = false
+
+[functions.send-party-notifications]
+verify_jwt = false
+
+[functions.process-payout]
+verify_jwt = false
+
+[functions.send-push-notification]
+verify_jwt = false
