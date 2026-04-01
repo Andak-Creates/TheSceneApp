@@ -14,6 +14,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import PartyCard from "../../components/PartyCard";
 import { detectUserLocation } from "../../lib/location";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "../../stores/authStore";
@@ -29,13 +30,17 @@ interface Stats {
   totalReviews?: number;
 }
 
-type Tab = "hosted" | "reposts" | "upcoming" | "past";
+type Tab = "hosted" | "reposts" | "upcoming" | "past" | "favorites";
 
 export default function ProfileScreen() {
   const router = useRouter();
   const { user, signOut } = useAuthStore();
   const { profile, fetchProfile } = useUserStore();
   const [hostedParties, setHostedParties] = useState<any[]>([]);
+  const [repostedParties, setRepostedParties] = useState<any[]>([]);
+  const [upcomingParties, setUpcomingParties] = useState<any[]>([]);
+  const [pastParties, setPastParties] = useState<any[]>([]);
+  const [favoritedParties, setFavoritedParties] = useState<any[]>([]);
 
   const [stats, setStats] = useState<Stats>({
     partiesAttended: 0,
@@ -43,7 +48,7 @@ export default function ProfileScreen() {
     followers: 0,
   });
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false); // ✅ ADD REFRESHING STATE
+  const [refreshing, setRefreshing] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("reposts");
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -57,34 +62,130 @@ export default function ProfileScreen() {
   const [detectingLocation, setDetectingLocation] = useState(false);
   const [isHostAdmin, setIsHostAdmin] = useState(false);
 
-  const fetchHostedParties = async () => {
+  const fetchAllTabData = async () => {
     if (!user) return;
+    const now = new Date();
 
     try {
-      const { data, error } = await supabase
-        .from("parties")
-        .select("*")
-        .eq("host_id", user.id)
-        .order("date", { ascending: false });
+      // Hosted parties (for host users) — fetched once, used for both Hosted tab and Upcoming merge
+      let hostedAll: any[] = [];
+      if (profile?.is_host) {
+        const { data: hosted } = await supabase
+          .from("parties")
+          .select(`*, party_media(thumbnail_url, media_type, is_primary)`)
+          .eq("host_id", user.id)
+          .order("date", { ascending: false });
+        hostedAll = (hosted || []).map((p: any) => {
+          const mediaRows: any[] = p.party_media || [];
+          const primaryMedia = mediaRows.find((m: any) => m.is_primary) || mediaRows[0];
+          return {
+            ...p,
+            thumbnail_url: primaryMedia?.media_type === "video" ? primaryMedia?.thumbnail_url ?? null : null,
+          };
+        });
+      }
 
-      if (error) throw error;
+      // Reposts
+      const { data: repostData } = await supabase
+        .from("party_reposts")
+        .select(`party:parties(*, party_media(thumbnail_url, media_type, is_primary))`)
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+      const reposts = (repostData || []).map((r: any) => r.party).filter(Boolean).map((p: any) => {
+        const mediaRows: any[] = p.party_media || [];
+        const primaryMedia = mediaRows.find((m: any) => m.is_primary) || mediaRows[0];
+        return {
+          ...p,
+          thumbnail_url: primaryMedia?.media_type === "video" ? primaryMedia?.thumbnail_url ?? null : null,
+        };
+      });
 
-      setHostedParties(data || []);
+      // Tickets (for upcoming/past)
+      const { data: ticketData } = await supabase
+        .from("tickets")
+        .select(`party:parties(*, party_media(thumbnail_url, media_type, is_primary))`)
+        .eq("user_id", user.id)
+        .eq("payment_status", "completed");
+      const ticketParties = (ticketData || []).map((t: any) => t.party).filter(Boolean).map((p: any) => {
+        const mediaRows: any[] = p.party_media || [];
+        const primaryMedia = mediaRows.find((m: any) => m.is_primary) || mediaRows[0];
+        return {
+          ...p,
+          thumbnail_url: primaryMedia?.media_type === "video" ? primaryMedia?.thumbnail_url ?? null : null,
+        };
+      });
+
+      // Hosted future + ticket future merged (deduplicated)
+      const hostedFuture = hostedAll.filter((p) => p.date_tba || !p.date || new Date(p.date) >= now);
+      const allUpcoming = [
+        ...hostedFuture,
+        ...ticketParties.filter((p: any) => p.date_tba || !p.date || new Date(p.date) >= now),
+      ];
+      const seen = new Set<string>();
+      const deduped = allUpcoming.filter((p: any) => {
+        if (seen.has(p.id)) return false;
+        seen.add(p.id);
+        return true;
+      });
+
+      // Favorites (party_likes)
+      const { data: likedData } = await supabase
+        .from("party_likes")
+        .select(`party:parties(*, party_media(thumbnail_url, media_type, is_primary))`)
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+      const favorites = (likedData || []).map((l: any) => l.party).filter(Boolean).map((p: any) => {
+        const mediaRows: any[] = p.party_media || [];
+        const primaryMedia = mediaRows.find((m: any) => m.is_primary) || mediaRows[0];
+        return {
+          ...p,
+          thumbnail_url: primaryMedia?.media_type === "video" ? primaryMedia?.thumbnail_url ?? null : null,
+        };
+      });
+
+      // Batch fetch view counts for all unique party IDs in one query
+      const allParties = [...hostedAll, ...ticketParties, ...reposts, ...favorites];
+      const uniqueIds = [...new Set(allParties.map((p: any) => p.id).filter(Boolean))];
+      let viewsMap: Record<string, number> = {};
+      if (uniqueIds.length > 0) {
+        const { data: viewRows } = await supabase
+          .from("party_views")
+          .select("party_id")
+          .in("party_id", uniqueIds);
+        for (const row of viewRows || []) {
+          viewsMap[row.party_id] = (viewsMap[row.party_id] || 0) + 1;
+        }
+      }
+      const addViews = (arr: any[]) => arr.map((p) => ({ ...p, views_count: viewsMap[p.id] || 0 }));
+
+      setHostedParties(addViews(hostedAll));
+      setRepostedParties(addViews(reposts));
+      setUpcomingParties(addViews(deduped));
+      // Past = ticket-attended past parties + hosted past parties (for hosts), deduplicated
+      const ticketPast = ticketParties.filter((p: any) => !p.date_tba && p.date && new Date(p.date) < now);
+      const hostedPast = hostedAll.filter((p: any) => !p.date_tba && p.date && new Date(p.date) < now);
+      const allPast = [...ticketPast, ...hostedPast];
+      const pastSeen = new Set<string>();
+      const dedupedPast = allPast.filter((p: any) => {
+        if (pastSeen.has(p.id)) return false;
+        pastSeen.add(p.id);
+        return true;
+      });
+      setPastParties(addViews(dedupedPast));
+      setFavoritedParties(addViews(favorites));
     } catch (e) {
-      console.error("Failed to fetch hosted parties:", e);
+      console.error("Failed to fetch tab data:", e);
     }
   };
+
 
   useEffect(() => {
     if (user && profile) {
       fetchUserStats();
       fetchUserCity();
+      fetchAllTabData();
       setEditBio(profile.bio || "");
       setEditFullName(profile.full_name || "");
-    }
-
-    if (profile?.is_host) {
-      fetchHostedParties();
     }
 
     // Check if user is a host-level admin (even without is_host flag)
@@ -708,6 +809,7 @@ export default function ProfileScreen() {
             "reposts",
             "upcoming",
             "past",
+            "favorites",
           ].map((tab) => (
             <TouchableOpacity
               key={tab}
@@ -717,88 +819,75 @@ export default function ProfileScreen() {
               }`}
             >
               <Text
-                className={`text-center font-bold capitalize ${
+                className={`text-center font-bold text-[10px] uppercase tracking-wide ${
                   activeTab === tab ? "text-white" : "text-gray-500"
                 }`}
               >
-                {tab === "hosted"
-                  ? "Hosted"
+                {tab === "hosted" ? "Hosted"
+                  : tab === "favorites" ? "Saved"
                   : tab.charAt(0).toUpperCase() + tab.slice(1)}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
 
-        {/* Empty State */}
-        <View className="pb-32">
-        {activeTab === "hosted" && profile?.is_host ? (
-          <View className="mt-6">
-            {hostedParties.length > 0 ? (
-              hostedParties.map((party) => (
-                <View
-                  key={party.id}
-                  className="bg-[#150d1e] rounded-2xl p-5 mb-3 border border-white/5"
-                >
-                  <Text className="text-white font-bold text-lg mb-1.5">
-                    {party.title}
-                  </Text>
-                  <Text className="text-gray-400 text-sm mb-1.5 font-medium">
-                    <Ionicons name="time-outline" size={14} color="#9ca3af" />{" "}
-                    {party.date
-                      ? new Date(party.date).toLocaleString()
-                      : "Date TBA"}
-                  </Text>
-                  <Text className="text-gray-400 text-sm font-medium">
-                    <Ionicons name="location-outline" size={14} color="#9ca3af" />{" "}
-                    {party.location
-                      ? party.location + ", " + party.city
-                      : "Location TBA"}
-                  </Text>
+        {/* Tab Content */}
+        <View className="pb-32 mt-6">
+          {(() => {
+            // Shared mini-card grid renderer
+            const renderGrid = (parties: any[], emptyIcon: any, emptyTitle: string, emptySubtitle: string) => {
+              if (parties.length === 0) {
+                return (
+                  <View className="items-center py-16">
+                    <View className="w-16 h-16 rounded-full bg-[#150d1e] border border-white/5 items-center justify-center mb-4">
+                      <Ionicons name={emptyIcon} size={28} color="#a855f7" />
+                    </View>
+                    <Text className="text-gray-200 font-bold text-lg">{emptyTitle}</Text>
+                    <Text className="text-gray-500 text-sm mt-1.5 text-center">{emptySubtitle}</Text>
+                  </View>
+                );
+              }
+              const rows: any[][] = [];
+              for (let i = 0; i < parties.length; i += 2) rows.push(parties.slice(i, i + 2));
+              return (
+                <View className="gap-3">
+                  {rows.map((row, ri) => (
+                    <View key={ri} className="flex-row gap-3">
+                      {row.map((party: any) => (
+                        <PartyCard key={party.id} party={party} />
+                      ))}
+                      {row.length === 1 && <View style={{ flex: 1 }} />}
+                    </View>
+                  ))}
                 </View>
-              ))
-            ) : (
-              <View className="items-center py-16">
-                <View className="w-16 h-16 rounded-full bg-[#150d1e] border border-white/5 items-center justify-center mb-4">
-                  <Ionicons name="calendar-outline" size={28} color="#a855f7" />
-                </View>
-                <Text className="text-gray-200 font-bold text-lg">No hosted parties yet</Text>
-                <Text className="text-gray-500 text-sm mt-1.5">
-                  Your hosted parties will appear here
-                </Text>
-              </View>
-            )}
-          </View>
-        ) : activeTab === "reposts" ? (
-          <View className="items-center py-16 mt-6">
-            <View className="w-16 h-16 rounded-full bg-[#150d1e] border border-white/5 items-center justify-center mb-4">
-              <Ionicons name="repeat" size={28} color="#a855f7" />
-            </View>
-            <Text className="text-gray-200 font-bold text-lg">No reposts yet</Text>
-            <Text className="text-gray-500 text-sm mt-1.5">
-              Parties you repost will appear here
-            </Text>
-          </View>
-        ) : activeTab === "upcoming" ? (
-          <View className="items-center py-16 mt-6">
-            <View className="w-16 h-16 rounded-full bg-[#150d1e] border border-white/5 items-center justify-center mb-4">
-              <Ionicons name="calendar" size={28} color="#a855f7" />
-            </View>
-            <Text className="text-gray-200 font-bold text-lg">No upcoming parties</Text>
-            <Text className="text-gray-500 text-sm mt-1.5">
-              Your upcoming events will show here
-            </Text>
-          </View>
-        ) : (
-          <View className="items-center py-16 mt-6">
-            <View className="w-16 h-16 rounded-full bg-[#150d1e] border border-white/5 items-center justify-center mb-4">
-              <Ionicons name="ticket" size={28} color="#a855f7" />
-            </View>
-            <Text className="text-gray-200 font-bold text-lg">No past parties</Text>
-            <Text className="text-gray-500 text-sm mt-1.5">
-              Past events you attended
-            </Text>
-          </View>
-        )}
+              );
+            };
+
+            if (activeTab === "hosted" && profile?.is_host) {
+              return renderGrid(hostedParties, "calendar-outline", "No hosted parties yet", "Your hosted parties will appear here");
+            }
+            if (activeTab === "reposts") {
+              return renderGrid(repostedParties, "repeat", "No reposts yet", "Parties you repost will appear here");
+            }
+            if (activeTab === "upcoming") {
+              return renderGrid(upcomingParties, "calendar", "No upcoming parties", "Parties you have tickets to will show here");
+            }
+            if (activeTab === "past") {
+              return renderGrid(pastParties, "ticket", "No past parties", "Past events you attended will appear here");
+            }
+            if (activeTab === "favorites") {
+              return (
+                <>
+                  <View className="flex-row items-center mb-4 bg-purple-500/10 border border-purple-500/20 rounded-xl px-4 py-3">
+                    <Ionicons name="lock-closed-outline" size={14} color="#a855f7" />
+                    <Text className="text-purple-300 text-xs ml-2 font-medium">Only you can see your saved parties</Text>
+                  </View>
+                  {renderGrid(favoritedParties, "heart-outline", "No saved parties yet", "Like a party to save it here for later")}
+                </>
+              );
+            }
+            return null;
+          })()}
         </View>
       </View>
     </ScrollView>

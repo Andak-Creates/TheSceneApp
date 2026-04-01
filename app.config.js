@@ -17,6 +17,7 @@ export default {
         : "com.vindi.thescene",
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
+        NSPhotoLibraryUsageDescription: "TheScene needs access to your photo library so you can choose a profile picture or share photos and videos from parties you attend.",
       },
     },
     android: {

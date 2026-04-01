@@ -56,7 +56,6 @@ interface Party {
   // TBA fields
   date_tba?: boolean;
   location_tba?: boolean;
-  ticket_price_tba?: boolean;
   // New fields
   lineup?: string[];
   dress_code?: string;
@@ -187,21 +186,36 @@ export default function PartyDetailScreen() {
   const [restockAmounts, setRestockAmounts] = useState<{
     [key: string]: string;
   }>({});
+  const [editingTierId, setEditingTierId] = useState<string | null>(null);
+  const [editTierName, setEditTierName] = useState("");
+  const [editTierPrice, setEditTierPrice] = useState("");
 
   const recordPartyView = async () => {
     if (!partyId || viewRecorded.current) return;
+    viewRecorded.current = true; // prevent duplicate calls in the same session
 
     try {
+      if (user) {
+        // Check if this user already viewed this party (unique per user)
+        const { data: existing } = await supabase
+          .from("party_views")
+          .select("id")
+          .eq("party_id", partyId)
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (existing) return; // already counted — don't add another row
+      }
+
       await supabase.from("party_views").insert({
         party_id: partyId,
         user_id: user?.id ?? null,
       });
-
-      viewRecorded.current = true; // prevent duplicate view in same session
     } catch (error) {
       console.log("View tracking failed:", error);
     }
   };
+
 
   useEffect(() => {
     if (partyId) {
@@ -286,6 +300,84 @@ export default function PartyDetailScreen() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleUpdateTier = async (tierId: string) => {
+    if (!party || !editTierName.trim() || !editTierPrice.trim()) {
+      Alert.alert("Error", "Please fill in all fields");
+      return;
+    }
+
+    const price = parseFloat(editTierPrice);
+    if (isNaN(price)) {
+      Alert.alert("Error", "Please enter a valid price");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from("ticket_tiers")
+        .update({
+          name: editTierName.trim(),
+          price: price,
+        })
+        .eq("id", tierId);
+
+      if (error) throw error;
+
+      // Update party min price if needed
+      if (price < (party.ticket_price || 999999)) {
+        await supabase
+          .from("parties")
+          .update({ ticket_price: price })
+          .eq("id", partyId);
+      }
+
+      setEditingTierId(null);
+      await fetchTicketTiers();
+      Alert.alert("Success", "Tier updated successfully");
+    } catch (error) {
+      console.error("Error updating tier:", error);
+      Alert.alert("Error", "Failed to update tier");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteTier = async (tierId: string, quantitySold: number) => {
+    const message =
+      quantitySold > 0
+        ? "This tier has already sold tickets. Deleting it will only hide it from new buyers. Are you sure?"
+        : "Are you sure you want to delete this ticket tier?";
+
+    Alert.alert("Delete Tier", message, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          setSaving(true);
+          try {
+            // Soft delete
+            const { error } = await supabase
+              .from("ticket_tiers")
+              .update({ is_active: false })
+              .eq("id", tierId);
+
+            if (error) throw error;
+
+            await fetchTicketTiers();
+            Alert.alert("Success", "Tier removed");
+          } catch (error) {
+            console.error("Error deleting tier:", error);
+            Alert.alert("Error", "Failed to delete tier");
+          } finally {
+            setSaving(false);
+          }
+        },
+      },
+    ]);
   };
 
   const handleAddNewTier = async () => {
@@ -1384,19 +1476,15 @@ export default function PartyDetailScreen() {
             <View className="flex-row justify-between items-center mb-2">
               <Text className="text-white font-bold text-lg">Tickets</Text>
               <Text className="text-purple-400 font-bold text-xl">
-                {party.ticket_price_tba
-                  ? "Price TBA"
-                  : `${ticketTiers.length > 1 ? "From " : ""}${currencySymbol}${displayPrice?.toLocaleString() ?? "0"}`}
+                {`${ticketTiers.length > 1 ? "From " : ""}${currencySymbol}${displayPrice?.toLocaleString() ?? "0"}`}
               </Text>
             </View>
-            {!party.ticket_price_tba && (
-              <Text className="text-gray-400 text-sm">
+            <Text className="text-gray-400 text-sm">
                 {ticketsRemaining} of {totalTickets} available
-              </Text>
-            )}
+            </Text>
 
             {/* ✅ SHOW TIER BREAKDOWN IF MULTIPLE TIERS AND NOT TBA */}
-            {!party.ticket_price_tba && ticketTiers.length > 1 && (
+            {ticketTiers.length > 1 && (
               <View className="mt-3 pt-3 border-t border-white/10">
                 {ticketTiers.map((tier) => (
                   <View
@@ -1517,9 +1605,7 @@ export default function PartyDetailScreen() {
           <Text className="text-white font-bold text-lg">
             {eventEnded
               ? "This event has ended"
-              : party.ticket_price_tba
-                ? "Get Tickets • TBA"
-                : `Get Tickets • ${ticketTiers.length > 1 ? "From " : ""}${currencySymbol}${displayPrice?.toLocaleString() ?? "0"}`}
+              : `Get Tickets • ${ticketTiers.length > 1 ? "From " : ""}${currencySymbol}${displayPrice?.toLocaleString() ?? "0"}`}
           </Text>
         </TouchableOpacity>
       </View>
@@ -1558,44 +1644,101 @@ export default function PartyDetailScreen() {
                   key={tier.id}
                   className="bg-white/5 rounded-2xl p-4 mb-4 border border-white/5"
                 >
-                  <View className="flex-row justify-between items-center mb-3">
+                  {editingTierId === tier.id ? (
                     <View>
-                      <Text className="text-white font-bold">{tier.name}</Text>
-                      <Text className="text-gray-400 text-xs">
-                        {tier.quantity_sold} sold / {tier.quantity} total
-                      </Text>
+                      <TextInput
+                        className="bg-white/10 rounded-xl px-4 py-3 text-white mb-3"
+                        placeholder="Tier Name"
+                        placeholderTextColor="#666"
+                        value={editTierName}
+                        onChangeText={setEditTierName}
+                      />
+                      <TextInput
+                        className="bg-white/10 rounded-xl px-4 py-3 text-white mb-4"
+                        placeholder="Price"
+                        placeholderTextColor="#666"
+                        keyboardType="numeric"
+                        value={editTierPrice}
+                        onChangeText={setEditTierPrice}
+                      />
+                      <View className="flex-row gap-3">
+                        <TouchableOpacity
+                          onPress={() => setEditingTierId(null)}
+                          className="flex-1 bg-white/5 py-3 rounded-xl items-center"
+                        >
+                          <Text className="text-gray-400 font-bold">Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => handleUpdateTier(tier.id)}
+                          className="flex-1 bg-purple-600 py-3 rounded-xl items-center"
+                        >
+                          <Text className="text-white font-bold">Save</Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
-                    <Text className="text-purple-400 font-bold">
-                      {currencySymbol}
-                      {tier.price.toLocaleString()}
-                    </Text>
-                  </View>
-                  <View className="flex-row gap-3">
-                    <TextInput
-                      className="flex-1 bg-white/10 rounded-xl px-4 py-2 text-white"
-                      placeholder="Add quantity..."
-                      placeholderTextColor="#666"
-                      keyboardType="number-pad"
-                      value={restockAmounts[tier.id] || ""}
-                      onChangeText={(val) =>
-                        setRestockAmounts((prev) => ({
-                          ...prev,
-                          [tier.id]: val,
-                        }))
-                      }
-                    />
-                    <TouchableOpacity
-                      onPress={() => handleRestockTier(tier.id, tier.quantity)}
-                      disabled={saving}
-                      className="bg-purple-600 px-6 py-2 rounded-xl justify-center"
-                    >
-                      {saving ? (
-                        <ActivityIndicator size="small" color="#fff" />
-                      ) : (
-                        <Text className="text-white font-bold">Add</Text>
-                      )}
-                    </TouchableOpacity>
-                  </View>
+                  ) : (
+                    <View>
+                      <View className="flex-row justify-between items-start mb-3">
+                        <View className="flex-1 mr-2">
+                          <View className="flex-row items-center gap-2 mb-1">
+                            <Text className="text-white font-bold text-lg">{tier.name}</Text>
+                            <TouchableOpacity 
+                              onPress={() => {
+                                setEditingTierId(tier.id);
+                                setEditTierName(tier.name);
+                                setEditTierPrice(tier.price.toString());
+                              }}
+                            >
+                              <Ionicons name="create-outline" size={16} color="#a855f7" />
+                            </TouchableOpacity>
+                          </View>
+                          <Text className="text-gray-400 text-xs">
+                            {tier.quantity_sold} sold / {tier.quantity} total
+                          </Text>
+                        </View>
+                        <View className="items-end">
+                          <Text className="text-purple-400 font-bold text-lg mb-2">
+                            {currencySymbol}{tier.price.toLocaleString()}
+                          </Text>
+                          <TouchableOpacity 
+                            onPress={() => handleDeleteTier(tier.id, tier.quantity_sold)}
+                            className="bg-red-500/10 p-1.5 rounded-full"
+                          >
+                            <Ionicons name="trash-outline" size={16} color="#ef4444" />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                      
+                      <View className="h-px bg-white/5 my-3" />
+                      
+                      <View className="flex-row gap-3">
+                        <TextInput
+                          className="flex-1 bg-white/10 rounded-xl px-4 py-3 text-white"
+                          placeholder="Add quantity..."
+                          placeholderTextColor="#666"
+                          keyboardType="number-pad"
+                          value={restockAmounts[tier.id] || ""}
+                          onChangeText={(val) =>
+                            setRestockAmounts((prev) => ({
+                              ...prev,
+                              [tier.id]: val,
+                            }))
+                          }
+                        />
+                        <TouchableOpacity
+                          onPress={() => handleRestockTier(tier.id, tier.quantity)}
+                          disabled={saving}
+                          className="bg-purple-600 px-6 py-3 rounded-xl justify-center"
+                        >
+                          {saving ? (
+                            <ActivityIndicator size="small" color="#fff" />
+                          ) : (
+                            <Text className="text-white font-bold">Restock</Text>
+                          )}
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
                 </View>
               ))}
 

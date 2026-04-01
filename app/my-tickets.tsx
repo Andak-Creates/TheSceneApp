@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Image as ExpoImage } from "expo-image";
 import * as Print from "expo-print";
 import { useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
@@ -12,6 +11,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Image,
 } from "react-native";
 import QRCode from "react-qr-code";
 import { supabase } from "../lib/supabase";
@@ -39,9 +39,19 @@ interface Ticket {
     city: string | null;
     date_tba?: boolean;
     location_tba?: boolean;
+    currency_code?: string;
     host: {
       username: string;
     };
+    host_profile?: {
+      name: string;
+    };
+    party_media?: {
+      media_url: string;
+      media_type: string;
+      thumbnail_url: string | null;
+      is_primary: boolean;
+    }[];
   };
 }
 
@@ -80,7 +90,10 @@ export default function MyTicketsScreen() {
             location,
             location_tba,
             city,
-            host:profiles!host_id (username)
+            currency_code,
+            host:profiles!host_id (username),
+            host_profile:host_profiles!host_profile_id (name),
+            party_media(media_url, media_type, thumbnail_url, is_primary)
           )
         `,
         )
@@ -123,6 +136,60 @@ export default function MyTicketsScreen() {
     const displayHours = hours % 12 || 12;
     const displayMinutes = minutes.toString().padStart(2, "0");
     return `${displayHours}:${displayMinutes} ${ampm}`;
+  };
+
+  const getCurrencySymbol = (code: string) => {
+    const symbols: Record<string, string> = {
+      NGN: "₦",
+      USD: "$",
+      GBP: "£",
+      EUR: "€",
+      GHS: "₵",
+      KES: "KSh",
+      ZAR: "R",
+      AUD: "A$",
+      CAD: "CA$",
+    };
+    return symbols[code] || code + " ";
+  };
+
+  const isVideoUrl = (url: string) => {
+    const lower = url.toLowerCase().split("?")[0];
+    return (
+      lower.endsWith(".mp4") ||
+      lower.endsWith(".mov") ||
+      lower.endsWith(".webm") ||
+      lower.endsWith(".m4v") ||
+      lower.endsWith(".3gp")
+    );
+  };
+
+  const resolvePreviewUri = (
+    flyerUrl: string | null | undefined,
+    primaryMedia: any | null | undefined
+  ) => {
+    if (primaryMedia) {
+      if (primaryMedia.media_type === "video" || (primaryMedia.media_url && isVideoUrl(primaryMedia.media_url))) {
+        if (primaryMedia.thumbnail_url) {
+          return { uri: primaryMedia.thumbnail_url, isThumb: true };
+        }
+        return null;
+      } else if (primaryMedia.media_url) {
+        return { uri: primaryMedia.media_url, isThumb: false };
+      }
+    }
+
+    if (
+      flyerUrl &&
+      (flyerUrl.startsWith("http") || flyerUrl.startsWith("https"))
+    ) {
+      if (!isVideoUrl(flyerUrl)) {
+        return { uri: flyerUrl, isThumb: false };
+      } else if (primaryMedia?.thumbnail_url) {
+        return { uri: primaryMedia.thumbnail_url, isThumb: true };
+      }
+    }
+    return null;
   };
 
   const upcomingTickets = tickets.filter((t) => {
@@ -317,7 +384,7 @@ export default function MyTicketsScreen() {
       <div class="header-section">
         <div class="tier-badge">${ticket.tier?.name || "General Admission"}</div>
         <div class="title">${ticket.party.title}</div>
-        <div class="host">Hosted by ${ticket.party.host.username}</div>
+        <div class="host">Hosted by ${ticket.party.host_profile?.name || ticket.party.host.username}</div>
       </div>
       
       <div class="main-content">
@@ -397,6 +464,15 @@ export default function MyTicketsScreen() {
       ticket.party.date &&
       new Date(ticket.party.date) < new Date();
 
+    const mediaRows: any[] = ticket.party.party_media || [];
+    const primaryMedia =
+      mediaRows.find((m: any) => m.is_primary) || mediaRows[0];
+    const preview = resolvePreviewUri(
+      ticket.party.flyer_url,
+      primaryMedia
+    );
+    const currencySymbol = getCurrencySymbol(ticket.party.currency_code || "NGN");
+
     return (
       <View className="mb-4 bg-white/5 rounded-2xl overflow-hidden">
         {/* Ticket Header */}
@@ -405,13 +481,19 @@ export default function MyTicketsScreen() {
           activeOpacity={0.8}
         >
           <View className="flex-row p-4">
-            {(ticket.party.flyer_url && (ticket.party.flyer_url.startsWith('http') || ticket.party.flyer_url.startsWith('https'))) ? (
-              <ExpoImage
-                source={{ uri: ticket.party.flyer_url }}
-                className="w-20 h-24 rounded-xl"
-                contentFit="cover"
-                transition={200}
-              />
+            {preview ? (
+              <View>
+                <Image
+                  source={{ uri: preview.uri }}
+                  className="w-20 h-24 rounded-xl"
+                  resizeMode="cover"
+                />
+                {preview.isThumb && (
+                  <View className="absolute top-1 right-1 bg-black/60 rounded-full p-1">
+                    <Ionicons name="videocam" size={10} color="#fff" />
+                  </View>
+                )}
+              </View>
             ) : (
               <View className="w-20 h-24 rounded-xl bg-gray-800 items-center justify-center">
                 <Ionicons name="image-outline" size={24} color="#444" />
@@ -425,7 +507,7 @@ export default function MyTicketsScreen() {
                 {ticket.party.title}
               </Text>
               <Text className="text-gray-400 text-sm mb-2">
-                by {ticket.party.host.username} • {ticket.tier?.name || "General"}
+                by {ticket.party.host_profile?.name || ticket.party.host.username} • {ticket.tier?.name || "General"}
               </Text>
 
               <View className="flex-row items-center mb-1">
@@ -558,21 +640,21 @@ export default function MyTicketsScreen() {
               <View className="flex-row justify-between mb-2">
                 <Text className="text-gray-400 text-sm">Ticket Price</Text>
                 <Text className="text-white text-sm">
-                  ₦{ticket.purchase_price.toLocaleString()}
+                  {currencySymbol}{ticket.purchase_price.toLocaleString()}
                 </Text>
               </View>
 
               <View className="flex-row justify-between mb-2">
                 <Text className="text-gray-400 text-sm">Service Fee</Text>
                 <Text className="text-white text-sm">
-                  ₦{ticket.service_fee.toLocaleString()}
+                  {currencySymbol}{ticket.service_fee.toLocaleString()}
                 </Text>
               </View>
 
               <View className="flex-row justify-between pt-2 border-t border-white/10">
                 <Text className="text-white font-bold">Total Paid</Text>
                 <Text className="text-purple-400 font-bold">
-                  ₦{ticket.total_paid.toLocaleString()}
+                  {currencySymbol}{ticket.total_paid.toLocaleString()}
                 </Text>
               </View>
             </View>

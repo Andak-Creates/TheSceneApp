@@ -1,4 +1,4 @@
-import { FontAwesome, Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { useState } from "react";
@@ -7,6 +7,7 @@ import {
   Alert,
   ImageBackground,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -197,58 +198,20 @@ export default function LoginScreen() {
               </Text>
             </View>
 
-            {/* Divider */}
-            <View className="flex-row items-center w-full py-6">
-              <View className="flex-1 h-[1px] bg-white/10" />
-              <Text className="mx-4 text-gray-500 text-sm font-medium">Or continue with</Text>
-              <View className="flex-1 h-[1px] bg-white/10" />
-            </View>
-
-            {/* Social Login Buttons — Coming Soon */}
-            <View className="w-full gap-3 mb-6">
-              <TouchableOpacity
-                className="py-4 flex flex-row justify-center items-center rounded-xl bg-white/5 border border-white/10 px-5 opacity-60"
-                activeOpacity={0.6}
-                onPress={handleSocialComingSoon}
-              >
-                <FontAwesome name="google" size={24} color="white" />
-                <Text className="text-white text-base font-bold ml-2">Continue with Google</Text>
-                <View className="ml-auto bg-white/10 px-2 py-0.5 rounded-full">
-                  <Text className="text-gray-500 text-xs font-medium">Soon</Text>
-                </View>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                className="flex-row items-center justify-center rounded-xl bg-white/5 border border-white/10 py-4 px-5 opacity-60"
-                activeOpacity={0.6}
-                onPress={handleSocialComingSoon}
-              >
-                <FontAwesome name="apple" size={24} color="#aaa" />
-                <Text className="text-white text-base font-bold ml-2">Continue with Apple</Text>
-                <View className="ml-auto bg-white/10 px-2 py-0.5 rounded-full">
-                  <Text className="text-gray-500 text-xs font-medium">Soon</Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-
             {/* Footer */}
             <View className="items-center">
               <Text className="text-gray-500 text-xs text-center px-4">
                 By continuing, you agree to our{" "}
                 <Text
                   className="text-gray-300 underline"
-                  onPress={() =>
-                    Alert.alert("Terms of Service", "Please visit thescene.app/terms to read our Terms of Service.")
-                  }
+                  onPress={() => Linking.openURL("https://thescene.vercel.app/terms-of-service")}
                 >
                   Terms of Service
                 </Text>{" "}
                 and{" "}
                 <Text
                   className="text-gray-300 underline"
-                  onPress={() =>
-                    Alert.alert("Privacy Policy", "Please visit thescene.app/privacy to read our Privacy Policy.")
-                  }
+                  onPress={() => Linking.openURL("https://thescene.vercel.app/privacy-policy")}
                 >
                   Privacy Policy
                 </Text>

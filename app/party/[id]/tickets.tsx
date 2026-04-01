@@ -27,8 +27,13 @@ interface Party {
   host?: {
     username: string;
   };
+  host_profile?: {
+    name: string;
+  };
   media?: {
     media_url: string;
+    media_type: string;
+    thumbnail_url: string | null;
     is_primary: boolean;
   }[];
 }
@@ -98,7 +103,8 @@ export default function TicketPurchaseScreen() {
           `
           *,
           host:profiles!host_id (username),
-          media:party_media(media_url, is_primary)
+          host_profile:host_profiles!host_profile_id (name),
+          media:party_media(media_url, media_type, thumbnail_url, is_primary)
         `,
         )
         .eq("id", partyId)
@@ -176,6 +182,20 @@ export default function TicketPurchaseScreen() {
     setPurchasing(true);
 
     const amountInSmallestUnit = totalPrice;
+
+    // Handle Free Tickets (0 Naira/Currency)
+    if (totalPrice === 0) {
+      setPurchasing(true);
+      try {
+        await handlePaymentSuccess("FREE_TICKET_" + Date.now());
+        return;
+      } catch (error) {
+        setPurchasing(false);
+        console.error("Free ticket success error:", error);
+        Alert.alert("Error", "Failed to process free ticket.");
+        return;
+      }
+    }
 
     try {
       popup.checkout({
@@ -401,10 +421,17 @@ export default function TicketPurchaseScreen() {
             {(() => {
               let imageSource = null;
               if (party.media && party.media.length > 0) {
-                const primary = party.media.find((m: any) => m.is_primary);
-                imageSource = primary
-                  ? primary.media_url
-                  : party.media[0].media_url;
+                const primary = party.media.find((m: any) => m.is_primary) || party.media[0];
+                const isVideo = (url: string) => {
+                  const lower = url.toLowerCase().split('?')[0];
+                  return lower.endsWith('.mp4') || lower.endsWith('.mov') || lower.endsWith('.webm');
+                };
+                
+                if (primary.media_type === 'video' || isVideo(primary.media_url)) {
+                  imageSource = (primary as any).thumbnail_url || primary.media_url;
+                } else {
+                  imageSource = primary.media_url;
+                }
               } else {
                 imageSource = party.flyer_url;
               }
@@ -425,7 +452,7 @@ export default function TicketPurchaseScreen() {
                 {party.title}
               </Text>
               <Text className="text-gray-400 text-sm mb-1">
-                by {party.host?.username}
+                by {party.host_profile?.name || party.host?.username}
               </Text>
               <View className="flex-row items-center mb-1">
                 <Ionicons name="calendar-outline" size={14} color="#9ca3af" />

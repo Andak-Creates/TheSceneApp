@@ -5,6 +5,7 @@ import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Image,
   Image as RNImage,
@@ -40,7 +41,6 @@ interface Party {
   created_at: string;
   date_tba?: boolean;
   location_tba?: boolean;
-  ticket_price_tba?: boolean;
   host?: {
     id: string;
     username: string;
@@ -359,6 +359,68 @@ export default function FeedScreen() {
     return `${displayHours}:${displayMinutes} ${ampm}`;
   };
 
+  const handleReportParty = async (party: Party) => {
+    if (!user) return;
+    try {
+      const { error } = await supabase.from("reports").insert({
+        reporter_id: user.id,
+        target_type: "party",
+        target_id: party.id,
+        reason: "Flagged by user for review",
+        status: "pending"
+      });
+      if (error) throw error;
+      Alert.alert("Report Submitted", "Thank you. Our team will review this party within 24 hours.");
+    } catch (e) {
+      console.error(e);
+      Alert.alert("Error", "Failed to submit report.");
+    }
+  };
+
+  const handleBlockHost = async (party: Party) => {
+    if (!user) return;
+    Alert.alert("Block User", `Are you sure you want to block ${party.host_profile?.name || "this host"}?`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Block", style: "destructive", onPress: async () => {
+          try {
+            const { error } = await supabase.from("blocked_users").insert({
+              blocker_id: user.id,
+              blocked_id: party.host_id
+            });
+            if (error) throw error;
+            // Instantly remove this host's parties from the feed array
+            setParties((prev) => prev.filter((p) => p.host_id !== party.host_id));
+            Alert.alert("User Blocked", "This host's content will no longer be visible to you.");
+          } catch (e: any) {
+             console.error(e);
+             if (e.code === '23505') {
+               Alert.alert("Info", "You have already blocked this user.");
+               setParties((prev) => prev.filter((p) => p.host_id !== party.host_id));
+               return;
+             }
+             Alert.alert("Error", "Could not block user.");
+          }
+      }}
+    ]);
+  };
+
+  const handlePartyOptions = (party: Party) => {
+    if (!user) return;
+    if (party.host_id === user.id) {
+      Alert.alert("Options", "This is your party.", [{ text: "Cancel", style: "cancel" }]);
+      return;
+    }
+    Alert.alert(
+      "Party Options",
+      "Please choose an action",
+      [
+        { text: "Report Party", style: "destructive", onPress: () => handleReportParty(party) },
+        { text: "Block Host", style: "destructive", onPress: () => handleBlockHost(party) },
+        { text: "Cancel", style: "cancel" }
+      ]
+    );
+  };
+
   const renderPartyCard = ({ item: party }: { item: Party }) => {
     return (
       <View className="pb-2">
@@ -399,12 +461,19 @@ export default function FeedScreen() {
             </Text>
           </View>
           {party.host?.is_host && (
-            <View className="bg-purple-500/10 px-3 py-1.5 rounded-full border border-purple-500/20">
+            <View className="bg-purple-500/10 px-3 py-1.5 rounded-full border border-purple-500/20 mr-2">
               <Text className="text-purple-400 text-xs font-bold tracking-wider">
                 HOST
               </Text>
             </View>
           )}
+          <TouchableOpacity
+            onPress={() => handlePartyOptions(party)}
+            className="p-3 -mr-2"
+            hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}
+          >
+             <Ionicons name="ellipsis-horizontal" size={22} color="#a3a3a3" />
+          </TouchableOpacity>
         </TouchableOpacity>
 
         {/* Party Gallery / Flyer */}
@@ -497,13 +566,15 @@ export default function FeedScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Party Info */}
-        <View className="px-5 pb-4">
-
+        {/* Party Info — tappable to open party details */}
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => router.push({ pathname: "/party/[id]", params: { id: party.id } })}
+          className="px-5 pb-4"
+        >
           <View className="flex-row items-center gap-2 mb-2">
-  <AttendancePill ticketsSold={party.tickets_sold} />
-</View>
-
+            <AttendancePill ticketsSold={party.tickets_sold} />
+          </View>
 
           <Text className="text-white text-xl font-extrabold mb-1.5 leading-tight">
             {party.title}
@@ -552,20 +623,19 @@ export default function FeedScreen() {
           <TouchableOpacity
             className="py-3.5 rounded-2xl items-center bg-white mt-1 shadow-lg shadow-white/10"
             activeOpacity={0.8}
-            onPress={() =>
+            onPress={(e) => {
+              e.stopPropagation?.();
               router.push({
                 pathname: "/party/[id]/tickets",
                 params: { id: party.id },
-              })
-            }
+              });
+            }}
           >
             <Text className="text-black font-extrabold text-base">
-              {party.ticket_price_tba
-                ? "Get Tickets • TBA"
-                : `Get Tickets • ${getCurrencySymbol(party.currency_code || "NGN")}${party.ticket_price?.toLocaleString() ?? "0"}`}
+              {`Get Tickets • ${getCurrencySymbol(party.currency_code || "NGN")}${party.ticket_price?.toLocaleString() ?? "0"}`}
             </Text>
           </TouchableOpacity>
-        </View>
+        </TouchableOpacity>
       </View>
     );
   };

@@ -14,6 +14,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import Svg, { Path } from "react-native-svg";
 import { supabase } from "../../../lib/supabase";
 import { useAuthStore } from "../../../stores/authStore";
 
@@ -25,6 +26,19 @@ interface PartyAnalytics {
     date: string;
     location: string;
     city: string;
+    media?: {
+      media_url: string;
+      media_type: string;
+      thumbnail_url: string | null;
+      is_primary: boolean;
+    }[];
+  };
+  viewStats: {
+    totalViews: number;
+    followerViews: number;
+    platformViews: number;
+    followerPercent: number;
+    platformPercent: number;
   };
   ticketStats: {
     totalCapacity: number;
@@ -106,7 +120,10 @@ export default function PartyAnalyticsScreen() {
       // Fetch party details
       const { data: party, error: partyError } = await supabase
         .from("parties")
-        .select("id, title, flyer_url, date, location, city, host_id")
+        .select(`
+          id, title, flyer_url, date, location, city, host_id,
+          media:party_media(media_url, media_type, thumbnail_url, is_primary)
+        `)
         .eq("id", partyId)
         .single();
 
@@ -238,6 +255,37 @@ export default function PartyAnalyticsScreen() {
         .map(([hour, count]) => ({ hour, count }))
         .sort((a, b) => parseInt(a.hour) - parseInt(b.hour));
 
+      // Calculate View Stats
+      const { data: viewsData } = await supabase
+        .from("party_views")
+        .select("user_id")
+        .eq("party_id", partyId)
+        .not("user_id", "is", null);
+
+      const { data: followersData } = await supabase
+        .from("follows")
+        .select("follower_id")
+        .eq("following_id", party.host_id);
+
+      const followerIds = new Set(followersData?.map((f: any) => f.follower_id) || []);
+      
+      let followerViews = 0;
+      let platformViews = 0;
+
+      const uniqueViewerIds = new Set(viewsData?.map((v: any) => v.user_id) || []);
+      const totalViews = uniqueViewerIds.size;
+
+      uniqueViewerIds.forEach(userId => {
+        if (followerIds.has(userId)) {
+          followerViews++;
+        } else {
+          platformViews++;
+        }
+      });
+
+      const followerPercent = totalViews > 0 ? (followerViews / totalViews) * 100 : 0;
+      const platformPercent = totalViews > 0 ? (platformViews / totalViews) * 100 : 0;
+
       // Recent check-ins
       const recentCheckIns = (checkIns || []).slice(0, 10).map((checkIn) => {
         const ticket = tickets?.find((t) => t.id === checkIn.ticket_id);
@@ -255,6 +303,13 @@ export default function PartyAnalyticsScreen() {
 
       setAnalytics({
         party,
+        viewStats: {
+          totalViews,
+          followerViews,
+          platformViews,
+          followerPercent,
+          platformPercent,
+        },
         ticketStats: {
           totalCapacity,
           totalSold,
@@ -445,10 +500,37 @@ export default function PartyAnalyticsScreen() {
             {/* Party Info Card */}
             <View className="bg-white/5 rounded-2xl p-4 mb-6">
               <View className="flex-row">
-                <Image
-                  source={{ uri: analytics.party.flyer_url }}
-                  className="w-20 h-24 rounded-xl"
-                />
+                {(() => {
+                  let imageSource = null;
+                  const isVideo = (url: string) => {
+                    if (!url) return false;
+                    const lower = url.toLowerCase().split('?')[0];
+                    return lower.endsWith('.mp4') || lower.endsWith('.mov') || lower.endsWith('.webm') || lower.endsWith('.m4v');
+                  };
+
+                  if (analytics.party.media && analytics.party.media.length > 0) {
+                    const primary = analytics.party.media.find((m: any) => m.is_primary) || analytics.party.media[0];
+                    if (primary.media_type === 'video' || isVideo(primary.media_url)) {
+                      imageSource = (primary as any).thumbnail_url || null;
+                    } else {
+                      imageSource = primary.media_url;
+                    }
+                  } else {
+                    imageSource = isVideo(analytics.party.flyer_url) ? null : analytics.party.flyer_url;
+                  }
+
+                  return imageSource ? (
+                    <Image
+                      source={{ uri: imageSource }}
+                      className="w-20 h-24 rounded-xl"
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View className="w-20 h-24 rounded-xl bg-gray-800 items-center justify-center">
+                      <Ionicons name="image-outline" size={24} color="#666" />
+                    </View>
+                  );
+                })()}
                 <View className="ml-4 flex-1">
                   <Text className="text-white font-bold text-base mb-1">
                     {analytics.party.title}
@@ -469,20 +551,20 @@ export default function PartyAnalyticsScreen() {
             </Text>
 
             {/* Revenue Card */}
-            <View className="bg-gradient-to-br from-purple-600 to-purple-800 rounded-2xl p-6 mb-4">
-              <Text className="text-purple-200 text-sm mb-1">
+            <View className="bg-white/5 rounded-2xl p-6 mb-4">
+              <Text className="text-gray-400 text-sm mb-1">
                 Total Revenue
               </Text>
               <Text className="text-white text-4xl font-bold mb-2">
                 ₦{analytics.ticketStats.totalRevenue.toLocaleString()}
               </Text>
-              <Text className="text-purple-200 text-sm">
+              <Text className="text-gray-400 text-sm">
                 From {analytics.ticketStats.totalSold} tickets sold
               </Text>
             </View>
 
             {/* Stats Grid */}
-            <View className="flex-row gap-3 mb-4">
+            <View className="flex-row gap-3 mb-6">
               <View className="flex-1 bg-white/5 rounded-2xl p-4">
                 <Ionicons name="ticket" size={24} color="#8B5CF6" />
                 <Text className="text-white text-2xl font-bold mt-2">
@@ -504,6 +586,71 @@ export default function PartyAnalyticsScreen() {
                 </Text>
                 <Text className="text-gray-500 text-xs">Checked In</Text>
               </View>
+            </View>
+
+            {/* Views Breakdown */}
+            <View className="bg-white/5 rounded-2xl p-4 mb-6">
+              <Text className="text-white font-bold text-lg mb-4">View Analytics</Text>
+              
+              <View className="flex-row justify-between mb-2">
+                <Text className="text-gray-400">Total Unique Views</Text>
+                <Text className="text-white font-bold">{analytics.viewStats.totalViews}</Text>
+              </View>
+
+              {analytics.viewStats.totalViews > 0 && (
+                <View className="mt-6">
+                  {/* Half Circle Donut Chart */}
+                  <View className="items-center justify-center mb-6">
+                    <Svg width={200} height={100} viewBox="0 0 200 100">
+                      {/* Non-Followers Background Arc */}
+                      <Path
+                        d="M 20 100 A 80 80 0 0 1 180 100"
+                        stroke="#3B82F6"
+                        strokeWidth={20}
+                        fill="none"
+                        strokeLinecap="round"
+                      />
+                      
+                      {/* Followers Foreground Arc */}
+                      <Path
+                        d="M 20 100 A 80 80 0 0 1 180 100"
+                        stroke="#9333ea"
+                        strokeWidth={20}
+                        fill="none"
+                        strokeDasharray={Math.PI * 80}
+                        strokeDashoffset={(Math.PI * 80) * (1 - (analytics.viewStats.followerPercent / 100))}
+                        strokeLinecap="round"
+                      />
+                    </Svg>
+                    <View className="absolute bottom-2 items-center">
+                      <Text className="text-white text-3xl font-bold">{analytics.viewStats.followerPercent.toFixed(0)}%</Text>
+                      <Text className="text-purple-400 text-xs">Followers</Text>
+                    </View>
+                  </View>
+
+                  {/* Legend */}
+                  <View className="flex-row justify-between border-t border-white/10 pt-4 mt-2">
+                    <View className="flex-row items-center gap-2">
+                      <View className="w-3 h-3 rounded-full bg-purple-600" />
+                      <View>
+                        <Text className="text-white font-semibold text-sm">Followers</Text>
+                        <Text className="text-gray-400 text-xs">
+                          {analytics.viewStats.followerPercent.toFixed(1)}% ({analytics.viewStats.followerViews})
+                        </Text>
+                      </View>
+                    </View>
+                    <View className="flex-row items-center gap-2">
+                      <View className="w-3 h-3 rounded-full bg-blue-500" />
+                      <View>
+                        <Text className="text-white font-semibold text-sm text-right">Non-Followers</Text>
+                        <Text className="text-gray-400 text-xs text-right">
+                          {analytics.viewStats.platformPercent.toFixed(1)}% ({analytics.viewStats.platformViews})
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+              )}
             </View>
 
             {/* Tier Breakdown */}

@@ -123,7 +123,6 @@ export default function HostVerificationScreen() {
   const uploadIdImage = async (uri: string): Promise<string> => {
     if (!user) throw new Error("Not authenticated");
 
-    // Modern approach: fetch the local URI as a blob, convert to ArrayBuffer
     const response = await fetch(uri);
     const blob = await response.blob();
     const arrayBuffer = await new Response(blob).arrayBuffer();
@@ -131,10 +130,10 @@ export default function HostVerificationScreen() {
     const fileExt = uri.split(".").pop()?.toLowerCase() || "jpg";
     const contentType = fileExt === "png" ? "image/png" : "image/jpeg";
 
-    const fileName = `${user.id}/id_${Date.now()}.${fileExt}`;
+    const fileName = `verification/${user.id}/id_${Date.now()}.${fileExt}`;
 
     const { data, error } = await supabase.storage
-      .from("verifications")
+      .from("flyers")
       .upload(fileName, arrayBuffer, {
         contentType: contentType,
         upsert: true,

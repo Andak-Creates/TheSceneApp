@@ -1,4 +1,4 @@
-import { FontAwesome, Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { useState } from "react";
@@ -7,6 +7,7 @@ import {
   Alert,
   ImageBackground,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -27,6 +28,7 @@ export default function SignUpScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [eulaAccepted, setEulaAccepted] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -34,6 +36,11 @@ export default function SignUpScreen() {
   const handleSignUp = async () => {
     if (!username.trim() || !email.trim() || !password.trim()) {
       setError("Please fill in all fields");
+      return;
+    }
+
+    if (!eulaAccepted) {
+      setError("You must agree to the Terms of Service and Privacy Policy");
       return;
     }
 
@@ -193,6 +200,34 @@ export default function SignUpScreen() {
                 </View>
               </View>
             </View>
+                        {/* EULA */}
+            <TouchableOpacity 
+              className="flex-row items-center justify-center px-4 mb-4"
+              onPress={() => setEulaAccepted(!eulaAccepted)}
+              activeOpacity={0.7}
+            >
+              <View className={`w-5 h-5 rounded border ${eulaAccepted ? 'bg-purple-600 border-purple-600' : 'border-gray-500'} items-center justify-center mr-3`}>
+                {eulaAccepted && <Ionicons name="checkmark" size={14} color="#fff" />}
+              </View>
+              <Text className="text-gray-400 text-xs flex-1">
+                I agree to the{" "}
+                <Text
+                  className="text-gray-300 underline font-medium"
+                  onPress={() => Linking.openURL("https://thescene.vercel.app/terms-of-service")}
+                >
+                  Terms of Service
+                </Text>{" "}
+                and{" "}
+                <Text
+                  className="text-gray-300 underline font-medium"
+                  onPress={() => Linking.openURL("https://thescene.vercel.app/privacy-policy")}
+                >
+                  Privacy Policy
+                </Text>
+                .
+              </Text>
+            </TouchableOpacity>
+
 
             {/* Sign Up Button */}
             <TouchableOpacity
@@ -222,64 +257,8 @@ export default function SignUpScreen() {
               </Text>
             </View>
 
-            {/* Divider */}
-            <View className="flex-row items-center w-full py-6">
-              <View className="flex-1 h-[1px] bg-white/10" />
-              <Text className="mx-4 text-gray-500 text-sm font-medium">Or sign up with</Text>
-              <View className="flex-1 h-[1px] bg-white/10" />
-            </View>
 
-            {/* Social Login Buttons — Coming Soon */}
-            <View className="w-full gap-3 mb-6">
-              <TouchableOpacity
-                className="py-4 flex flex-row justify-center items-center rounded-xl bg-white/5 border border-white/10 px-5 opacity-60"
-                activeOpacity={0.6}
-                onPress={handleSocialComingSoon}
-              >
-                <FontAwesome name="google" size={24} color="white" />
-                <Text className="text-white text-base font-bold ml-2">Continue with Google</Text>
-                <View className="ml-auto bg-white/10 px-2 py-0.5 rounded-full">
-                  <Text className="text-gray-500 text-xs font-medium">Soon</Text>
-                </View>
-              </TouchableOpacity>
 
-              <TouchableOpacity
-                className="flex-row items-center justify-center rounded-xl bg-white/5 border border-white/10 py-4 px-5 opacity-60"
-                activeOpacity={0.6}
-                onPress={handleSocialComingSoon}
-              >
-                <FontAwesome name="apple" size={24} color="#aaa" />
-                <Text className="text-white text-base font-bold ml-2">Continue with Apple</Text>
-                <View className="ml-auto bg-white/10 px-2 py-0.5 rounded-full">
-                  <Text className="text-gray-500 text-xs font-medium">Soon</Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-
-            {/* Footer */}
-            <View className="items-center">
-              <Text className="text-gray-500 text-xs text-center px-4">
-                By signing up, you agree to our{" "}
-                <Text
-                  className="text-gray-300 underline"
-                  onPress={() =>
-                    Alert.alert("Terms of Service", "Please visit thescene.app/terms to read our Terms of Service.")
-                  }
-                >
-                  Terms of Service
-                </Text>{" "}
-                and{" "}
-                <Text
-                  className="text-gray-300 underline"
-                  onPress={() =>
-                    Alert.alert("Privacy Policy", "Please visit thescene.app/privacy to read our Privacy Policy.")
-                  }
-                >
-                  Privacy Policy
-                </Text>
-                .
-              </Text>
-            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
