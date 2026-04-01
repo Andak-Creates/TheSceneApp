@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import PartyCard from "../../components/PartyCard";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "../../stores/authStore";
 
@@ -33,13 +34,16 @@ interface Party {
   id: string;
   title: string;
   flyer_url: string;
+  thumbnail_url?: string | null;
   date: string | null;
   city: string | null;
   ticket_price: number | null;
   currency_code: string;
+  date_tba?: boolean;
+  views_count?: number;
 }
 
-type ActiveTab = "attended" | "liked";
+type ActiveTab = "reposts" | "upcoming" | "past";
 
 export default function UserProfileScreen() {
   const router = useRouter();
@@ -51,9 +55,10 @@ export default function UserProfileScreen() {
   const [isFollowing, setIsFollowing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [followLoading, setFollowLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<ActiveTab>("attended");
-  const [attendedParties, setAttendedParties] = useState<Party[]>([]);
-  const [likedParties, setLikedParties] = useState<Party[]>([]);
+  const [activeTab, setActiveTab] = useState<ActiveTab>("reposts");
+  const [repostedParties, setRepostedParties] = useState<Party[]>([]);
+  const [upcomingParties, setUpcomingParties] = useState<Party[]>([]);
+  const [pastParties, setPastParties] = useState<Party[]>([]);
   const [partiesLoading, setPartiesLoading] = useState(false);
 
   useEffect(() => {
@@ -64,9 +69,9 @@ export default function UserProfileScreen() {
 
   useEffect(() => {
     if (profile) {
-      fetchParties(activeTab);
+      fetchTabData();
     }
-  }, [activeTab, profile]);
+  }, [profile]);
 
   const fetchProfile = async () => {
     try {
@@ -79,7 +84,6 @@ export default function UserProfileScreen() {
       if (error) throw error;
       setProfile(data);
 
-      // Fetch stats and follow status in parallel
       const [followersRes, followingRes, followStatusRes] = await Promise.all([
         supabase
           .from("follows")
@@ -111,43 +115,60 @@ export default function UserProfileScreen() {
     }
   };
 
-  const fetchParties = async (tab: ActiveTab) => {
+  const fetchTabData = async () => {
     setPartiesLoading(true);
+    const now = new Date();
+
     try {
-      if (tab === "attended") {
-        // Parties they've bought tickets for
-        const { data } = await supabase
-          .from("tickets")
-          .select(`
-            party:parties (
-              id, title, flyer_url, date, city, ticket_price, currency_code
-            )
-          `)
+      const [repostsRes, ticketsRes] = await Promise.all([
+        supabase
+          .from("party_reposts")
+          .select(`party:parties(id, title, flyer_url, date, city, ticket_price, currency_code, date_tba, party_media(thumbnail_url, media_type, is_primary))`)
           .eq("user_id", id)
-          .eq("payment_status", "completed");
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("tickets")
+          .select(`party:parties(id, title, flyer_url, date, city, ticket_price, currency_code, date_tba, party_media(thumbnail_url, media_type, is_primary))`)
+          .eq("user_id", id)
+          .eq("payment_status", "completed"),
+      ]);
 
-        const parties = (data || [])
-          .map((t: any) => t.party)
-          .filter(Boolean);
-        setAttendedParties(parties);
-      } else {
-        // Parties they've liked
-        const { data } = await supabase
-          .from("party_likes")
-          .select(`
-            party:parties (
-              id, title, flyer_url, date, city, ticket_price, currency_code
-            )
-          `)
-          .eq("user_id", id);
+      const extractThumb = (p: any): Party => {
+        const mediaRows: any[] = p.party_media || [];
+        const primaryMedia = mediaRows.find((m: any) => m.is_primary) || mediaRows[0];
+        return {
+          ...p,
+          thumbnail_url: primaryMedia?.media_type === "video" ? primaryMedia?.thumbnail_url ?? null : null,
+        };
+      };
 
-        const parties = (data || [])
-          .map((t: any) => t.party)
-          .filter(Boolean);
-        setLikedParties(parties);
+      const reposts: Party[] = (repostsRes.data || []).map((r: any) => r.party).filter(Boolean).map(extractThumb);
+      const tickets: Party[] = (ticketsRes.data || []).map((t: any) => t.party).filter(Boolean).map(extractThumb);
+      const upcoming = tickets.filter((p) => p.date_tba || !p.date || new Date(p.date) >= now);
+      const past = tickets.filter((p) => !p.date_tba && !!p.date && new Date(p.date) < now);
+
+      // Fetch view counts in one batch for all unique party ids
+      const allParties = [...reposts, ...tickets];
+      const allIds = [...new Set(allParties.map((p) => p.id))];
+
+      let viewsMap: Record<string, number> = {};
+      if (allIds.length > 0) {
+        const { data: viewRows } = await supabase
+          .from("party_views")
+          .select("party_id")
+          .in("party_id", allIds);
+        for (const row of viewRows || []) {
+          viewsMap[row.party_id] = (viewsMap[row.party_id] || 0) + 1;
+        }
       }
+
+      const addViews = (arr: Party[]) => arr.map((p) => ({ ...p, views_count: viewsMap[p.id] || 0 }));
+
+      setRepostedParties(addViews(reposts));
+      setUpcomingParties(addViews(upcoming));
+      setPastParties(addViews(past));
     } catch (error) {
-      console.error("Error fetching parties:", error);
+      console.error("Error fetching tab data:", error);
     } finally {
       setPartiesLoading(false);
     }
@@ -177,7 +198,6 @@ export default function UserProfileScreen() {
           following_id: id,
         });
 
-        // Notify the user they have a new follower
         const { data: followerProfile } = await supabase
           .from("profiles")
           .select("username")
@@ -194,11 +214,11 @@ export default function UserProfileScreen() {
         });
 
         sendPush(
-  id as string,
-  "👤 New follower",
-  `${followerProfile?.username || "Someone"} started following you`,
-  { type: "new_follower", follower_id: user.id }
-);
+          id as string,
+          "👤 New follower",
+          `${followerProfile?.username || "Someone"} started following you`,
+          { type: "new_follower", follower_id: user.id }
+        );
       }
     } catch (error) {
       console.error("Error toggling follow:", error);
@@ -212,50 +232,27 @@ export default function UserProfileScreen() {
     }
   };
 
-  const formatDate = (dateString: string | null) => {
-    if (!dateString) return "TBA";
-    return new Date(dateString).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-    });
-  };
 
   const renderPartyCard = ({ item }: { item: Party }) => (
-    <TouchableOpacity
-      className="mr-4"
-      style={{ width: 160 }}
-      onPress={() =>
-        router.push({ pathname: "/party/[id]", params: { id: item.id } })
-      }
-    >
-      {item.flyer_url &&
-      (item.flyer_url.startsWith("http") ||
-        item.flyer_url.startsWith("https")) ? (
-        <ExpoImage
-          source={{ uri: item.flyer_url }}
-          className="w-full rounded-2xl mb-2"
-          style={{ aspectRatio: 4 / 5 }}
-          contentFit="cover"
-          transition={200}
-        />
-      ) : (
-        <View
-          className="w-full rounded-2xl mb-2 bg-gray-800 items-center justify-center"
-          style={{ aspectRatio: 4 / 5 }}
-        >
-          <Ionicons name="image-outline" size={40} color="#444" />
-        </View>
-      )}
-      <Text className="text-white font-bold text-sm mb-1" numberOfLines={1}>
-        {item.title}
-      </Text>
-      <Text className="text-gray-400 text-xs">
-        {formatDate(item.date)} {item.city ? `· ${item.city}` : ""}
-      </Text>
-    </TouchableOpacity>
+    <View className="mr-3" style={{ width: 165 }}>
+      <PartyCard party={item} />
+    </View>
   );
 
-  const currentParties = activeTab === "attended" ? attendedParties : likedParties;
+  const tabs: { key: ActiveTab; label: string }[] = [
+    { key: "reposts", label: "Reposts" },
+    { key: "upcoming", label: "Upcoming" },
+    { key: "past", label: "Past" },
+  ];
+
+  const getActiveList = (): Party[] => {
+    switch (activeTab) {
+      case "reposts": return repostedParties;
+      case "upcoming": return upcomingParties;
+      case "past": return pastParties;
+    }
+  };
+
   const isOwnProfile = user?.id === id;
 
   if (loading) {
@@ -357,58 +354,50 @@ export default function UserProfileScreen() {
 
         {/* Tabs */}
         <View className="flex-row border-b border-white/10 mb-4">
-          <TouchableOpacity
-            onPress={() => setActiveTab("attended")}
-            className={`flex-1 pb-3 ${
-              activeTab === "attended" ? "border-b-2 border-purple-600" : ""
-            }`}
-          >
-            <Text
-              className={`text-center font-semibold ${
-                activeTab === "attended" ? "text-white" : "text-gray-400"
+          {tabs.map((tab) => (
+            <TouchableOpacity
+              key={tab.key}
+              onPress={() => setActiveTab(tab.key)}
+              className={`flex-1 pb-3 ${
+                activeTab === tab.key ? "border-b-2 border-purple-600" : ""
               }`}
             >
-              Attended
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => setActiveTab("liked")}
-            className={`flex-1 pb-3 ${
-              activeTab === "liked" ? "border-b-2 border-purple-600" : ""
-            }`}
-          >
-            <Text
-              className={`text-center font-semibold ${
-                activeTab === "liked" ? "text-white" : "text-gray-400"
-              }`}
-            >
-              Liked
-            </Text>
-          </TouchableOpacity>
+              <Text
+                className={`text-center font-semibold ${
+                  activeTab === tab.key ? "text-white" : "text-gray-400"
+                }`}
+              >
+                {tab.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
 
         {/* Party List */}
-        {partiesLoading ? (
-          <View className="py-12 items-center">
-            <ActivityIndicator size="small" color="#8B5CF6" />
-          </View>
-        ) : currentParties.length > 0 ? (
-          <FlatList
-            data={currentParties}
-            renderItem={renderPartyCard}
-            keyExtractor={(item) => item.id}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ paddingBottom: 40 }}
-          />
-        ) : (
-          <View className="py-12 items-center">
-            <Ionicons name="calendar-outline" size={48} color="#666" />
-            <Text className="text-gray-400 mt-3">
-              No {activeTab === "attended" ? "attended" : "liked"} parties yet
-            </Text>
-          </View>
-        )}
+        <View className="pb-12">
+          {partiesLoading ? (
+            <View className="py-12 items-center">
+              <ActivityIndicator size="small" color="#8B5CF6" />
+            </View>
+          ) : getActiveList().length > 0 ? (
+            <FlatList
+              data={getActiveList()}
+              renderItem={renderPartyCard}
+              keyExtractor={(item) => item.id}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: 8 }}
+              scrollEnabled={true}
+            />
+          ) : (
+            <View className="py-12 items-center">
+              <Ionicons name="calendar-outline" size={44} color="#333" />
+              <Text className="text-gray-500 mt-3 font-medium">
+                No {activeTab} parties yet
+              </Text>
+            </View>
+          )}
+        </View>
       </View>
     </ScrollView>
   );

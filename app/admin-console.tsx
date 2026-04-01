@@ -352,12 +352,15 @@ export default function AdminConsole() {
         <Text className="text-white text-sm mb-2">{item.address || "—"}</Text>
         <Text className="text-purple-400 text-xs font-bold uppercase mb-1">Phone</Text>
         <Text className="text-white text-sm mb-2">{item.phone || "—"}</Text>
-        {item.id_image_url && (
-          <>
-            <Text className="text-purple-400 text-xs font-bold uppercase mb-2">ID Photo</Text>
-            <ExpoImage source={{ uri: item.id_image_url }} className="w-full h-32 rounded-lg" contentFit="cover" />
-          </>
-        )}
+        {item.id_image_url && (() => {
+          const { data } = supabase.storage.from("flyers").getPublicUrl(item.id_image_url);
+          return (
+            <>
+              <Text className="text-purple-400 text-xs font-bold uppercase mb-2">ID Photo</Text>
+              <ExpoImage source={{ uri: data.publicUrl }} className="w-full h-32 rounded-lg" contentFit="cover" />
+            </>
+          );
+        })()}
       </View>
       {item.status === "pending" && (
         <View className="flex-row gap-3">

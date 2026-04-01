@@ -29,14 +29,14 @@ export default function WelcomeScreen() {
       />
 
       <View className="flex-1 items-start justify-end px-6 pb-20 bg-[black]/30">
-        <View className="mb-6 flex flex-col gap-3">
-          <View className="bg-white/10 flex h-8 w-fit items-start justify-center gap-x-2 rounded-full px-4 border border-white/5">
+        <View className="mb-6 flex flex-col gap-3 items-start">
+          <View className="bg-white/10 flex h-8 items-start justify-center gap-x-2 rounded-full px-4 border border-white/5">
             <Text className="text-white text-xs font-bold leading-normal tracking-wide uppercase">
               🔥 Trending now
             </Text>
           </View>
 
-          <View className="bg-white/10 flex h-8 shrink-0 w-fit items-center justify-center gap-x-2 rounded-full px-4 border border-white/5">
+          <View className="bg-white/10 flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-full px-4 border border-white/5">
             <Text className="text-white text-xs font-bold leading-normal tracking-wide uppercase">
               📌 500+ events near you
             </Text>

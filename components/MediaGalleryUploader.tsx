@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as VideoThumbnails from "expo-video-thumbnails";
 import React, { useState } from "react";
 import {
     ActivityIndicator,
@@ -16,6 +17,7 @@ interface MediaItem {
   type: "image" | "video";
   order: number;
   isPrimary: boolean;
+  thumbnailUri?: string;
   uploading?: boolean;
   uploadedUrl?: string;
 }
@@ -76,11 +78,23 @@ export default function MediaGalleryUploader({
       const video = await pickVideo(120); // 2 min max
       if (!video) return;
 
+      let thumbnailUri: string | undefined;
+      try {
+        const { uri } = await VideoThumbnails.getThumbnailAsync(video.uri, {
+          time: 1000,
+          quality: 0.6,
+        });
+        thumbnailUri = uri;
+      } catch (e) {
+        console.log("Local thumbnail generation failed:", e);
+      }
+
       const newMedia: MediaItem = {
         uri: video.uri,
         type: "video",
         order: media.length,
-        isPrimary: false,
+        isPrimary: media.length === 0,
+        thumbnailUri,
       };
 
       const updated = [...media, newMedia];
@@ -143,7 +157,7 @@ export default function MediaGalleryUploader({
           {media.map((item, index) => (
             <View key={index} className="mr-3 relative">
               <Image
-                source={{ uri: item.uri }}
+                source={{ uri: item.thumbnailUri || item.uri }}
                 className="w-32 h-32 rounded-xl"
               />
 

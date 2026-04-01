@@ -71,8 +71,10 @@ interface MediaItem {
   type: "image" | "video";
   order: number;
   isPrimary: boolean;
+  thumbnailUri?: string;
   uploading?: boolean;
   uploadedUrl?: string;
+  uploadedThumbnailUrl?: string;
 }
 
 const safeParseFloat = (value: string): number => {
@@ -213,7 +215,6 @@ export default function CreatePartyScreen() {
     setShowStartTimePicker(false);
     setShowEndDatePicker(false);
     setShowEndTimePicker(false);
-    setPriceTBA(false);
     setDressCode("");
     setSelectedGenres([]);
     setSelectedVibes([]);
@@ -256,7 +257,6 @@ export default function CreatePartyScreen() {
   // TBA toggles
   const [dateTBA, setDateTBA] = useState(false);
   const [locationTBA, setLocationTBA] = useState(false);
-  const [priceTBA, setPriceTBA] = useState(false);
 
   const [dressCode, setDressCode] = useState("");
 
@@ -354,15 +354,13 @@ export default function CreatePartyScreen() {
           return "Please select at least one vibe";
         break;
       case 4:
-        if (!priceTBA) {
-          for (const tier of ticketTiers) {
-            if (!tier.name.trim())
-              return "Please fill in all ticket tier names";
-            if (!tier.price.trim() || isNaN(parseFloat(tier.price)))
-              return "Please fill in all ticket prices or mark as TBA";
-            if (!tier.quantity.trim() || parseInt(tier.quantity) <= 0)
-              return "Please fill in valid quantities";
-          }
+        for (const tier of ticketTiers) {
+          if (!tier.name.trim())
+            return "Please fill in all ticket tier names";
+          if (!tier.price.trim() || isNaN(parseFloat(tier.price)))
+            return "Please fill in all ticket prices";
+          if (!tier.quantity.trim() || parseInt(tier.quantity) <= 0)
+            return "Please fill in valid quantities";
         }
         break;
     }
@@ -400,7 +398,11 @@ export default function CreatePartyScreen() {
       for (const item of mediaGallery) {
         try {
           const result = await uploadPartyMedia(user.id, item.uri, item.type);
-          uploadedMedia.push({ ...item, uploadedUrl: result.url });
+          uploadedMedia.push({ 
+            ...item, 
+            uploadedUrl: result.url,
+            uploadedThumbnailUrl: result.thumbnailUrl 
+          });
         } catch (uploadError) {
           throw new Error(
             "Failed to upload some media files. Please try again.",
@@ -432,7 +434,7 @@ export default function CreatePartyScreen() {
       let lowestPrice: number | null = null;
       let totalQuantity = 0;
 
-      if (!priceTBA && ticketTiers.length > 0) {
+      if (ticketTiers.length > 0) {
         lowestPrice = Math.min(
           ...ticketTiers.map((t) => safeParseFloat(t.price)),
         );
@@ -458,7 +460,6 @@ export default function CreatePartyScreen() {
           country: country.trim(), // always saved
           location_tba: locationTBA,
           ticket_price: lowestPrice,
-          ticket_price_tba: priceTBA,
           currency_code: currency,
           dress_code: dressCode.trim() || null,
           ticket_quantity: totalQuantity,
@@ -486,6 +487,7 @@ export default function CreatePartyScreen() {
           party_id: party.id,
           media_type: item.type,
           media_url: item.uploadedUrl,
+          thumbnail_url: item.uploadedThumbnailUrl,
           is_primary: item.isPrimary,
           display_order: index,
         }));
@@ -496,7 +498,7 @@ export default function CreatePartyScreen() {
           console.error("Media insert error (non-fatal):", mediaError);
       }
 
-      if (!priceTBA && ticketTiers.length > 0) {
+      if (ticketTiers.length > 0) {
         const tiersToInsert = ticketTiers.map((tier, index) => ({
           party_id: party.id,
           name: tier.name.trim(),
@@ -1212,80 +1214,69 @@ export default function CreatePartyScreen() {
                   selectedCurrency={currency}
                   onSelect={setCurrency}
                 />
-                <View className="mt-4 pt-4 border-t border-white/5">
-                  <TBAToggle
-                    label="Price TBA"
-                    value={priceTBA}
-                    onChange={setPriceTBA}
-                    description="Mark if pricing is not yet decided"
-                  />
-                </View>
               </View>
 
-              {!priceTBA &&
-                ticketTiers.map((tier, index) => (
-                  <View
-                    key={tier.id}
-                    className="bg-[#150d1e] border border-white/5 rounded-3xl p-5 mb-4"
-                  >
-                    <View className="flex-row justify-between items-center mb-4 pb-2 border-b border-white/5">
-                      <Text className="text-white font-bold text-lg">
-                        Tier {index + 1}
-                      </Text>
-                      {ticketTiers.length > 1 && (
-                        <TouchableOpacity
-                          onPress={() => removeTicketTier(tier.id)}
-                          className="bg-red-500/10 p-2 rounded-full"
-                        >
-                          <Ionicons name="trash" size={18} color="#ef4444" />
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                    <TextInput
-                      className="bg-[#09030e] border border-white/5 rounded-2xl px-5 py-4 text-white mb-4"
-                      placeholder="Tier name (e.g., VIP, General)"
-                      placeholderTextColor="#666"
-                      value={tier.name}
-                      onChangeText={(val) =>
-                        updateTicketTier(tier.id, "name", val)
-                      }
-                    />
-                    <View className="flex-row gap-4">
-                      <TextInput
-                        className="flex-1 bg-[#09030e] border border-white/5 rounded-2xl px-5 py-4 text-white"
-                        placeholder={`Price (${currency})`}
-                        placeholderTextColor="#666"
-                        value={tier.price}
-                        onChangeText={(val) =>
-                          updateTicketTier(tier.id, "price", val)
-                        }
-                        keyboardType="numeric"
-                      />
-                      <TextInput
-                        className="flex-1 bg-[#09030e] border border-white/5 rounded-2xl px-5 py-4 text-white"
-                        placeholder="Quantity"
-                        placeholderTextColor="#666"
-                        value={tier.quantity}
-                        onChangeText={(val) =>
-                          updateTicketTier(tier.id, "quantity", val)
-                        }
-                        keyboardType="numeric"
-                      />
-                    </View>
-                  </View>
-                ))}
-
-              {!priceTBA && (
-                <TouchableOpacity
-                  onPress={addTicketTier}
-                  className="flex-row items-center justify-center bg-[#150d1e] border border-purple-500/20 rounded-2xl py-4 mt-2"
+              {ticketTiers.map((tier, index) => (
+                <View
+                  key={tier.id}
+                  className="bg-[#150d1e] border border-white/5 rounded-3xl p-5 mb-4"
                 >
-                  <Ionicons name="add-circle" size={22} color="#a855f7" />
-                  <Text className="text-purple-400 font-bold ml-2.5 text-base">
-                    Add Another Tier
-                  </Text>
-                </TouchableOpacity>
-              )}
+                  <View className="flex-row justify-between items-center mb-4 pb-2 border-b border-white/5">
+                    <Text className="text-white font-bold text-lg">
+                      Tier {index + 1}
+                    </Text>
+                    {ticketTiers.length > 1 && (
+                      <TouchableOpacity
+                        onPress={() => removeTicketTier(tier.id)}
+                        className="bg-red-500/10 p-2 rounded-full"
+                      >
+                        <Ionicons name="trash" size={18} color="#ef4444" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  <TextInput
+                    className="bg-[#09030e] border border-white/5 rounded-2xl px-5 py-4 text-white mb-4"
+                    placeholder="Tier name (e.g., VIP, General)"
+                    placeholderTextColor="#666"
+                    value={tier.name}
+                    onChangeText={(val) =>
+                      updateTicketTier(tier.id, "name", val)
+                    }
+                  />
+                  <View className="flex-row gap-4">
+                    <TextInput
+                      className="flex-1 bg-[#09030e] border border-white/5 rounded-2xl px-5 py-4 text-white"
+                      placeholder={`Price (${currency})`}
+                      placeholderTextColor="#666"
+                      value={tier.price}
+                      onChangeText={(val) =>
+                        updateTicketTier(tier.id, "price", val)
+                      }
+                      keyboardType="numeric"
+                    />
+                    <TextInput
+                      className="flex-1 bg-[#09030e] border border-white/5 rounded-2xl px-5 py-4 text-white"
+                      placeholder="Quantity"
+                      placeholderTextColor="#666"
+                      value={tier.quantity}
+                      onChangeText={(val) =>
+                        updateTicketTier(tier.id, "quantity", val)
+                      }
+                      keyboardType="numeric"
+                    />
+                  </View>
+                </View>
+              ))}
+
+              <TouchableOpacity
+                onPress={addTicketTier}
+                className="flex-row items-center justify-center bg-[#150d1e] border border-purple-500/20 rounded-2xl py-4 mt-2"
+              >
+                <Ionicons name="add-circle" size={22} color="#a855f7" />
+                <Text className="text-purple-400 font-bold ml-2.5 text-base">
+                  Add Another Tier
+                </Text>
+              </TouchableOpacity>
             </View>
           )}
 
@@ -1306,8 +1297,8 @@ export default function CreatePartyScreen() {
 
               {mediaGallery.length > 0 && (
                 <ExpoImage
-                  source={{ uri: mediaGallery[0].uri }}
-                  className="w-full rounded-3xl mb-6 border border-white/5"
+                  source={{ uri: mediaGallery[0].thumbnailUri || mediaGallery[0].uri }}
+                  className="w-full rounded-3xl overflow-hidden mb-6 border border-white/5"
                   style={{ aspectRatio: 4 / 5 }}
                 />
               )}
@@ -1356,30 +1347,24 @@ export default function CreatePartyScreen() {
                 <Text className="text-white font-extrabold text-lg mb-4">
                   Ticket Tiers
                 </Text>
-                {priceTBA ? (
-                  <Text className="text-gray-500 font-medium italic bg-[#09030e] p-4 rounded-xl">
-                    Price To Be Announced
-                  </Text>
-                ) : (
-                  <View className="bg-[#09030e] rounded-2xl overflow-hidden border border-white/5">
-                    {ticketTiers.map((tier, index) => (
-                      <View
-                        key={tier.id}
-                        className={`flex-row justify-between items-center p-4 ${index !== ticketTiers.length - 1 ? "border-b border-white/5" : ""}`}
-                      >
-                        <Text className="text-gray-300 font-semibold">
-                          {tier.name}
+                <View className="bg-[#09030e] rounded-2xl overflow-hidden border border-white/5">
+                  {ticketTiers.map((tier, index) => (
+                    <View
+                      key={tier.id}
+                      className={`flex-row justify-between items-center p-4 ${index !== ticketTiers.length - 1 ? "border-b border-white/5" : ""}`}
+                    >
+                      <Text className="text-gray-300 font-semibold">
+                        {tier.name}
+                      </Text>
+                      <Text className="text-white font-bold">
+                        {currency} {tier.price}{" "}
+                        <Text className="text-gray-500 font-normal">
+                          ({tier.quantity})
                         </Text>
-                        <Text className="text-white font-bold">
-                          {currency} {tier.price}{" "}
-                          <Text className="text-gray-500 font-normal">
-                            ({tier.quantity})
-                          </Text>
-                        </Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
               </View>
             </View>
           )}

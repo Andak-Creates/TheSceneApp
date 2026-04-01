@@ -6,26 +6,32 @@ import {
   ActivityIndicator,
   FlatList,
   RefreshControl,
-  Image as RNImage,
   ScrollView,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
-import { getCurrencySymbol } from "../../lib/currency";
+import PartyCard from "../../components/PartyCard";
+import ProfileCard, { SearchResultProfile } from "../../components/ProfileCard";
 import { supabase } from "../../lib/supabase";
+import { useAuthStore } from "../../stores/authStore";
 
 interface Party {
   id: string;
   title: string;
   flyer_url: string;
+  thumbnail_url?: string | null;
   date: string | null;
+  end_date: string | null;
   city: string | null;
+  state: string | null;
+  country: string | null;
   ticket_price: number | null;
   music_genres: string[];
   date_tba?: boolean;
   currency_code?: string;
+  views_count?: number;
 }
 
 const GENRES = [
@@ -48,10 +54,12 @@ export default function SearchScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedGenre, setSelectedGenre] = useState<string | null>(null);
   const [parties, setParties] = useState<Party[]>([]);
+  const [profiles, setProfiles] = useState<SearchResultProfile[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   // Inside the component:
+  const { user } = useAuthStore();
   const { setFeedActive } = useAudioStore();
 
   useFocusEffect(
@@ -69,10 +77,71 @@ export default function SearchScreen() {
       try {
         let supabaseQuery = supabase
           .from("parties")
-          .select("*")
+          .select(`*, party_media(thumbnail_url, media_type, is_primary), host_profile:host_profiles(name, is_verified)`)
           .eq("is_published", true);
 
         if (query) {
+          // Fetch profiles first
+          const [usersData, hostsData] = await Promise.all([
+            supabase
+              .from("profiles")
+              .select("id, username, full_name, avatar_url")
+              .or(`username.ilike.%${query}%,full_name.ilike.%${query}%`)
+              .limit(10),
+            supabase
+              .from("host_profiles")
+              .select("id, owner_id, name, avatar_url, is_verified, owner:profiles!owner_id(username)")
+              .ilike("name", `%${query}%`)
+              .limit(10),
+          ]);
+          
+          const uData = usersData.data || [];
+          const hData = hostsData.data || [];
+          
+          let combined: SearchResultProfile[] = [];
+          
+          if (uData.length > 0) {
+             combined = [...combined, ...uData.map((u: any): SearchResultProfile => ({
+                type: "user",
+                id: u.id,
+                owner_id: u.id,
+                username: u.username,
+                full_name: u.full_name || "",
+                avatar_url: u.avatar_url,
+                initialIsFollowing: false,
+             }))];
+          }
+          
+          if (hData.length > 0) {
+             combined = [...combined, ...hData.map((h: any): SearchResultProfile => ({
+                type: "host",
+                id: h.id,
+                owner_id: h.owner_id,
+                username: h.owner?.username || "",
+                full_name: h.name,
+                avatar_url: h.avatar_url,
+                is_verified: h.is_verified,
+                initialIsFollowing: false,
+             }))];
+          }
+          
+          if (user && combined.length > 0) {
+            const ownerIds = combined.map(p => p.owner_id);
+            const { data: followsData } = await supabase
+              .from("follows")
+              .select("following_id")
+              .eq("follower_id", user.id)
+              .in("following_id", ownerIds);
+              
+            const followSet = new Set(followsData?.map(f => f.following_id) || []);
+            combined = combined.map(p => ({
+               ...p,
+               initialIsFollowing: followSet.has(p.owner_id)
+            }));
+          }
+          
+          setProfiles(combined);
+
           // Handle common squashed words like "afrobeats" -> "afro beats"
           const normalizedQuery = query.toLowerCase().trim();
           let tokens = normalizedQuery.split(/\s+/).filter((t) => t.length > 0);
@@ -92,7 +161,7 @@ export default function SearchScreen() {
             );
 
             // 2. Build the OR filter for this token
-            let componentQuery = `title.ilike.%${token}%,description.ilike.%${token}%,city.ilike.%${token}%`;
+            let componentQuery = `title.ilike.%${token}%,description.ilike.%${token}%,city.ilike.%${token}%,state.ilike.%${token}%,country.ilike.%${token}%`;
 
             // 3. If the token matches any genres, include a containment check for those genres
             if (matchingGenres.length > 0) {
@@ -104,6 +173,8 @@ export default function SearchScreen() {
 
             supabaseQuery = supabaseQuery.or(componentQuery);
           }
+        } else {
+          setProfiles([]);
         }
 
         if (genre) {
@@ -115,7 +186,49 @@ export default function SearchScreen() {
           .limit(50);
 
         if (error) throw error;
-        setParties(data || []);
+
+        // Filter out ended parties (same logic as feed)
+        const now = new Date();
+        const activeParties = (data || []).filter((party: any) => {
+          if (party.date_tba) return true;
+          if (party.end_date) return new Date(party.end_date) > now;
+          if (party.date) {
+            const startDate = new Date(party.date);
+            const twelveHoursAgo = new Date(now.getTime() - 12 * 60 * 60 * 1000);
+            return startDate > twelveHoursAgo;
+          }
+          return true;
+        }).map((party: any) => {
+          // Extract thumbnail_url from the first primary media row
+          const mediaRows: any[] = party.party_media || [];
+          const primaryMedia = mediaRows.find((m: any) => m.is_primary) || mediaRows[0];
+          const thumbnail_url = primaryMedia?.media_type === "video"
+            ? primaryMedia?.thumbnail_url ?? null
+            : null;
+          return { ...party, thumbnail_url };
+        });
+
+        if (activeParties.length > 0) {
+          const partyIds = activeParties.map((p: any) => p.id);
+          const { data: viewRows } = await supabase
+            .from("party_views")
+            .select("party_id")
+            .in("party_id", partyIds);
+
+          const viewsMap: Record<string, number> = {};
+          for (const row of viewRows || []) {
+            viewsMap[row.party_id] = (viewsMap[row.party_id] || 0) + 1;
+          }
+
+          const partiesWithViews = activeParties.map((p: any) => ({
+            ...p,
+            views_count: viewsMap[p.id] || 0,
+          }));
+
+          setParties(partiesWithViews);
+        } else {
+          setParties([]);
+        }
       } catch (err) {
         console.error("Search error:", err);
       } finally {
@@ -134,43 +247,18 @@ export default function SearchScreen() {
     return () => clearTimeout(delayDebounceFn);
   }, [searchQuery, selectedGenre, fetchSearchParties]);
 
-  const renderPartyItem = ({ item }: { item: Party }) => (
-    <TouchableOpacity
-      activeOpacity={0.9}
-      onPress={() =>
-        router.push({ pathname: "/party/[id]", params: { id: item.id } })
-      }
-      className="mx-6 mb-4 bg-white/5 rounded-3xl overflow-hidden border border-white/5 flex-row"
-    >
-      <RNImage
-        source={{ uri: item.flyer_url }}
-        className="w-24 h-24 m-3 rounded-2xl"
-        resizeMode="cover"
-      />
-      <View className="flex-1 justify-center pr-4">
-        <Text className="text-white font-bold text-base" numberOfLines={1}>
-          {item.title}
-        </Text>
-        <Text className="text-gray-400 text-xs mt-1" numberOfLines={1}>
-          {item.city || "Various Locations"}
-        </Text>
-        <View className="flex-row items-center mt-2">
-          <Text className="text-purple-400 font-bold text-sm">
-            {item.date_tba
-              ? "TBA"
-              : item.date
-                ? new Date(item.date).toLocaleDateString()
-                : ""}
-          </Text>
-          <View className="w-1 h-1 rounded-full bg-gray-600 mx-2" />
-          <Text className="text-white font-medium text-sm">
-            {getCurrencySymbol(item.currency_code || "NGN")}
-            {item.ticket_price?.toLocaleString() || "0"}
-          </Text>
-        </View>
-      </View>
-    </TouchableOpacity>
+  const renderPartyRow = ({ item }: { item: [Party, Party | null] }) => (
+    <View className="flex-row gap-3 px-6 mb-3">
+      <PartyCard party={item[0]} />
+      {item[1] ? <PartyCard party={item[1]} /> : <View style={{ flex: 1 }} />}
+    </View>
   );
+
+  // Group parties into pairs for 2-column grid
+  const partyRows: [Party, Party | null][] = [];
+  for (let i = 0; i < parties.length; i += 2) {
+    partyRows.push([parties[i], parties[i + 1] ?? null]);
+  }
 
   return (
     <View className="flex-1 bg-[#09030e] pt-16">
@@ -180,7 +268,7 @@ export default function SearchScreen() {
           <Ionicons name="search" size={20} color="#666" />
           <TextInput
             className="flex-1 ml-3 text-white font-medium"
-            placeholder="Search parties, artists, or venues"
+            placeholder="Search parties, city, state or country…"
             placeholderTextColor="#666"
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -235,11 +323,11 @@ export default function SearchScreen() {
         </View>
       ) : (
         <FlatList
-          data={parties}
-          renderItem={renderPartyItem}
-          keyExtractor={(item) => item.id}
+          data={partyRows}
+          renderItem={renderPartyRow}
+          keyExtractor={(_, i) => `row-${i}`}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: 100 }}
+          contentContainerStyle={{ paddingBottom: 100, paddingTop: 4 }}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -250,16 +338,25 @@ export default function SearchScreen() {
               tintColor="#a855f7"
             />
           }
+          ListHeaderComponent={profiles.length > 0 ? (
+            <View className="mb-4">
+              <Text className="text-white font-bold text-lg px-6 mb-3">People & Brands</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 24 }}>
+                {profiles.map(p => <ProfileCard key={`${p.type}-${p.id}`} profile={p} />)}
+              </ScrollView>
+              {partyRows.length > 0 && <Text className="text-white font-bold text-lg px-6 mt-6 mb-1">Parties</Text>}
+            </View>
+          ) : null}
           ListEmptyComponent={
             <View className="items-center justify-center py-20 px-10">
               <View className="w-20 h-20 rounded-full bg-white/5 items-center justify-center mb-6">
                 <Ionicons name="search-outline" size={32} color="#333" />
               </View>
               <Text className="text-white text-xl font-bold mb-2">
-                No results found
+                {profiles.length > 0 ? "No parties found" : "No results found"}
               </Text>
               <Text className="text-gray-500 text-center">
-                Try searching for something else or browse different genres.
+                {profiles.length > 0 ? "Try searching for a different party" : "Try searching for something else or browse different genres."}
               </Text>
             </View>
           }
