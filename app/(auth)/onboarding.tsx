@@ -49,6 +49,7 @@ export default function OnboardingScreen() {
   const [detectingLocation, setDetectingLocation] = useState(false);
   const [showManualLocation, setShowManualLocation] = useState(false);
   const [manualCity, setManualCity] = useState("");
+  const [manualState, setManualState] = useState("");
   const [manualCountry, setManualCountry] = useState("");
 
   const handleDetectLocation = async () => {
@@ -66,13 +67,13 @@ export default function OnboardingScreen() {
   };
 
   const handleManualLocation = () => {
-    if (!manualCity.trim() || !manualCountry.trim()) {
-      setError("Please enter both city and country.");
+    if (!manualCity.trim() || !manualState.trim() || !manualCountry.trim()) {
+      setError("Please enter your city, state, and country.");
       return;
     }
     setLocationData({
       city: manualCity.trim(),
-      state: null,
+      state: manualState.trim(),
       country: manualCountry.trim(),
       latitude: null,
       longitude: null,
@@ -254,6 +255,13 @@ export default function OnboardingScreen() {
                     placeholderTextColor="#666"
                     value={manualCity}
                     onChangeText={setManualCity}
+                  />
+                  <TextInput
+                    className="bg-white/10 border border-white/20 rounded-xl h-12 px-4 text-white"
+                    placeholder="State (e.g. Lagos State)"
+                    placeholderTextColor="#666"
+                    value={manualState}
+                    onChangeText={setManualState}
                   />
                   <TextInput
                     className="bg-white/10 border border-white/20 rounded-xl h-12 px-4 text-white"

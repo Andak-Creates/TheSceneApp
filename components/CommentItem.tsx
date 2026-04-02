@@ -294,7 +294,7 @@ export default function CommentItem({
                 {formatTimeAgo(comment.created_at)}
               </Text>
 
-              <TouchableOpacity onPress={() => onReply(comment.id, displayName)}>
+              <TouchableOpacity onPress={() => onReply(comment.parent_comment_id || comment.id, displayName)}>
                 <Text className="text-gray-400 text-[10px] font-bold">
                   Reply
                 </Text>

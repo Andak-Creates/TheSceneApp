@@ -9,7 +9,7 @@ import { decode } from "base64-arraybuffer";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import * as VideoThumbnails from "expo-video-thumbnails";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -101,15 +101,13 @@ export default function PartyDetailScreen() {
   const openComments = params.openComments === "true";
   const viewRecorded = useRef(false);
   const { setActiveVideoId } = useAudioStore();
-  const { setFeedActive } = useAudioStore();
+  const [isFocused, setIsFocused] = useState(true);
 
   useFocusEffect(
     useCallback(() => {
-      setFeedActive(false); // pause feed when this screen is focused
-      return () => {
-        setFeedActive(true); // resume feed when leaving
-      };
-    }, []),
+      setIsFocused(true);
+      return () => setIsFocused(false);
+    }, [])
   );
 
   useEffect(() => {
@@ -1135,6 +1133,7 @@ export default function PartyDetailScreen() {
               media={party.media}
               showDelete={isEditing}
               onDelete={handleDeleteMedia}
+              isActive={isFocused}
             />
           ) : party.flyer_url &&
             (party.flyer_url.startsWith("http") ||
