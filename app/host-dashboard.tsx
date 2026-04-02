@@ -5,7 +5,6 @@ import { useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
-    Image,
     RefreshControl,
     ScrollView,
     Text,
@@ -16,6 +15,7 @@ import { supabase } from "../lib/supabase";
 import { useAuthStore } from "../stores/authStore";
 import { useUserStore } from "../stores/userStore";
 import HostProfileSelector from "../components/HostProfileSelector";
+import { Image } from "expo-image";
 
 type Tab = "parties" | "scanner" | "analytics";
 type FilterType = "all" | "owned" | "admin";
@@ -32,6 +32,13 @@ interface Party {
   tickets_sold: number;
   date_tba?: boolean;
   host_profile_id?: string | null;
+  media?: {
+    media_url: string;
+    media_type: "image" | "video";
+    thumbnail_url?: string;
+    is_primary: boolean;
+    display_order: number;
+  }[];
 }
 
 // ✅ ADD TIER INFO TO PARTY
@@ -149,7 +156,7 @@ export default function HostDashboardScreen() {
       if (profileIds.length > 0) {
         const { data, error } = await supabase
           .from("parties")
-          .select("*")
+          .select("*, media:party_media(media_url, media_type, thumbnail_url, is_primary, display_order)")
           .or(`host_profile_id.in.(${profileIds.join(',')}),host_id.eq.${user.id}`)
           .order("date", { ascending: true });
         if (error) throw error;
@@ -157,7 +164,7 @@ export default function HostDashboardScreen() {
       } else {
         const { data, error } = await supabase
           .from("parties")
-          .select("*")
+          .select("*, media:party_media(media_url, media_type, thumbnail_url, is_primary, display_order)")
           .eq("host_id", user.id)
           .order("date", { ascending: true });
         if (error) throw error;
@@ -432,79 +439,7 @@ export default function HostDashboardScreen() {
         console.log("✅ Party verification passed!");
       }
 
-      // ✅ FIRST: CHECK IF TICKET EXISTS AT ALL
-      console.log("🔍 Looking up ticket with ID:", ticketId);
-
-      const { data: ticketCheck, error: checkError } = await supabase
-        .from("tickets")
-        .select("*")
-        .eq("id", ticketId);
-
-      console.log("📊 Ticket lookup result:");
-      console.log("  Found tickets:", ticketCheck?.length || 0);
-      if (ticketCheck && ticketCheck.length > 0) {
-        console.log("  Ticket data:", JSON.stringify(ticketCheck[0], null, 2));
-      }
-      console.log("  Error:", checkError);
-
-      // If no ticket found, try to help debug
-      if (!ticketCheck || ticketCheck.length === 0) {
-        console.log("❌ No ticket found with this ID");
-
-        // Check if ANY tickets exist for this party
-        const { data: partyTickets, error: partyError } = await supabase
-          .from("tickets")
-          .select("id, user_id, party_id")
-          .eq("party_id", partyId)
-          .limit(5);
-
-        console.log(
-          "📋 Sample tickets for this party:",
-          partyTickets?.length || 0,
-        );
-        if (partyTickets && partyTickets.length > 0) {
-          console.log(
-            "  Sample IDs:",
-            partyTickets.map((t) => t.id.substring(0, 8)),
-          );
-        }
-
-        setScanResult({
-          success: false,
-          message: `Ticket not found. ID: ${ticketId.substring(0, 8)}...`,
-        });
-        setTimeout(() => setScanning(false), 3000);
-        return;
-      }
-
-      const ticket = ticketCheck[0];
-
-      // Check payment status
-      if (ticket.payment_status !== "completed") {
-        console.log("❌ Ticket payment not completed");
-        setScanResult({
-          success: false,
-          message: "Ticket payment not completed",
-        });
-        setTimeout(() => setScanning(false), 3000);
-        return;
-      }
-
-      // Check if ticket is already fully used
-      if (ticket.quantity_used >= ticket.quantity_purchased) {
-        console.log("❌ Ticket fully used");
-        setScanResult({
-          success: false,
-          message: `All ${ticket.quantity_purchased} entries have been used`,
-        });
-        setTimeout(() => setScanning(false), 5000);
-        return;
-      }
-
-      console.log("✅ Ticket is valid! Proceeding to check-in...");
-      console.log(
-        `  Usage: ${ticket.quantity_used}/${ticket.quantity_purchased}`,
-      );
+      // ✅ DELEGATE TO SECURE RPC (Bypasses RLS)
 
       // ✅ CALL CHECK-IN FUNCTION
       console.log("📞 Calling check_in_ticket RPC...");
@@ -599,6 +534,22 @@ export default function HostDashboardScreen() {
     );
   };
 
+  const getPrimaryMediaUrl = (party: PartyWithTiers): string => {
+    if (party.media && party.media.length > 0) {
+      const sorted = [...party.media].sort((a, b) => {
+        if (a.is_primary) return -1;
+        if (b.is_primary) return 1;
+        return (a.display_order || 0) - (b.display_order || 0);
+      });
+      const primary = sorted[0];
+      if (primary.media_type === "video") {
+        return primary.thumbnail_url || primary.media_url || party.flyer_url;
+      }
+      return primary.media_url || party.flyer_url;
+    }
+    return party.flyer_url;
+  };
+
   const renderPartiesTab = () => {
     const filteredParties = parties.filter(p => filterType === "all" || p.ownershipType === filterType);
     
@@ -641,8 +592,11 @@ export default function HostDashboardScreen() {
             >
               <View className="flex-row p-4">
                 <Image
-                  source={{ uri: party.flyer_url }}
-                  className="w-20 h-24 rounded-xl"
+                  source={{ uri: getPrimaryMediaUrl(party) || "" }}
+                  className="rounded-xl bg-white/5"
+                  style={{ width: 80, height: 96 }}
+                  contentFit="cover"
+                  transition={200}
                 />
                 <View className="ml-4 flex-1">
                   <Text

@@ -105,6 +105,9 @@ export default function CommentsBottomSheet({
             id,
             username,
             avatar_url
+          ),
+          replies:party_comments (
+            id
           )
         `)
         .eq("party_id", partyId)
@@ -112,7 +115,13 @@ export default function CommentsBottomSheet({
         .order("created_at", { ascending: false });
 
       if (error) throw error;
-      setComments(data || []);
+      
+      const formattedData = (data || []).map(c => ({
+        ...c,
+        reply_count: c.replies ? c.replies.length : c.reply_count
+      }));
+      
+      setComments(formattedData);
       setExpandedComments(new Set());
     } catch (error) {
       console.error("Error fetching comments:", error);
@@ -197,12 +206,16 @@ const handleSubmitComment = async () => {
           nextTopLevelIndex === -1 ? prev.length : nextTopLevelIndex;
 
         const newList = [...prev];
+        // Increment visual reply count for the parent
+        newList[parentIndex] = {
+          ...newList[parentIndex],
+          reply_count: (newList[parentIndex].reply_count || 0) + 1
+        };
         newList.splice(insertAt, 0, inserted);
         return newList;
       });
 
       // Mark parent as expanded so replies stay visible
-      // DB trigger handles reply_count increment automatically
       setExpandedComments((prev) => new Set(prev).add(replyingTo.id));
 
       // Notify the person being replied to
