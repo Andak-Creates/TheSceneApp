@@ -11,6 +11,8 @@ import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import * as VideoThumbnails from "expo-video-thumbnails";
+import { shareParty } from "@/lib/share";
+import { Image } from "expo-image";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -19,7 +21,6 @@ import {
   Linking,
   Modal,
   Platform,
-  Image as RNImage,
   ScrollView,
   Share,
   Text,
@@ -83,6 +84,8 @@ interface Party {
     display_order: number;
     thumbnail_url?: string;
   }[];
+  has_ticket?: boolean;
+  has_reviewed?: boolean;
 }
 
 interface TicketTier {
@@ -499,26 +502,46 @@ export default function PartyDetailScreen() {
         .select("*", { count: "exact", head: true })
         .eq("party_id", partyId);
 
-      // Check if user liked and bookmarked
+      // Check engagement and tickets
       let isLiked = false;
       let isBookmarked = false;
+      let hasTicket = false;
+      let hasReviewed = false;
+
       if (user) {
-        const [likeRes, bookmarkRes] = await Promise.all([
+        const [likeRes, bookmarkRes, ticketRes, reviewRes] = await Promise.all([
           supabase
             .from("party_likes")
             .select("id")
             .eq("party_id", partyId)
             .eq("user_id", user.id)
-            .single(),
+            .maybeSingle(),
           supabase
             .from("party_bookmarks")
             .select("id")
             .eq("party_id", partyId)
             .eq("user_id", user.id)
-            .single(),
+            .maybeSingle(),
+          supabase
+            .from("tickets")
+            .select("id")
+            .eq("party_id", partyId)
+            .eq("user_id", user.id)
+            .eq("payment_status", "completed")
+            .limit(1)
+            .maybeSingle(),
+          supabase
+            .from("reviews")
+            .select("id")
+            .eq("party_id", partyId)
+            .eq("reviewer_id", user.id)
+            .limit(1)
+            .maybeSingle(),
         ]);
         isLiked = !!likeRes.data;
         isBookmarked = !!bookmarkRes.data;
+        hasTicket = !!ticketRes.data;
+        hasReviewed = !!reviewRes.data;
       }
 
       setParty({
@@ -527,6 +550,8 @@ export default function PartyDetailScreen() {
         comments_count: commentsCount || 0,
         is_liked: isLiked,
         is_bookmarked: isBookmarked,
+        has_ticket: hasTicket,
+        has_reviewed: hasReviewed,
       });
     } catch (error) {
       console.error("Error fetching party:", error);
@@ -856,16 +881,7 @@ export default function PartyDetailScreen() {
 
   const handleShareLink = async () => {
     if (!party) return;
-    const url = `https://thescene.vercel.app/party/${partyId}`;
-    try {
-      await Share.share({
-        message: `Check out "${party.title}" on TheScene! ${url}`,
-        url: Platform.OS !== "web" ? url : undefined,
-        title: party.title,
-      });
-    } catch (e) {
-      // User cancelled or share failed
-    }
+    await shareParty(partyId, party.title);
   };
 
   const handleBookmark = async () => {
@@ -913,9 +929,10 @@ export default function PartyDetailScreen() {
 
   const handleBlockHost = async () => {
     if (!user || !party) return;
+    const brandName = party.host_profile?.name || "this brand";
     Alert.alert(
-      "Block Host",
-      "Are you sure you want to block this host? You will no longer see their content.",
+      "Block Brand",
+      `Are you sure you want to block "${brandName}"? You will no longer see events from this brand. Their other brands will not be affected.`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -923,24 +940,27 @@ export default function PartyDetailScreen() {
           style: "destructive",
           onPress: async () => {
             try {
-              const { error } = await supabase.from("blocked_users").insert({
+              if (!party.host_profile?.id) {
+                Alert.alert("Error", "Could not identify the brand to block.");
+                return;
+              }
+              const { error } = await supabase.from("blocked_host_profiles").insert({
                 blocker_id: user.id,
-                blocked_id: party.host_id,
+                blocked_host_profile_id: party.host_profile.id,
               });
               if (error) throw error;
               Alert.alert(
-                "Host Blocked",
-                "You have successfully blocked this host.",
+                "Brand Blocked",
+                `You have blocked "${brandName}". You won't see their events anymore.`,
               );
               router.back();
             } catch (e: any) {
               console.error(e);
               if (e.code === "23505") {
-                // unique violation
-                Alert.alert("Info", "You have already blocked this host.");
+                Alert.alert("Info", "You have already blocked this brand.");
                 return;
               }
-              Alert.alert("Error", "Could not block host.");
+              Alert.alert("Error", "Could not block brand.");
             }
           },
         },
@@ -1109,7 +1129,7 @@ export default function PartyDetailScreen() {
                           style: "destructive",
                         },
                         {
-                          text: "Block Host",
+                          text: "Block Brand",
                           onPress: handleBlockHost,
                           style: "destructive",
                         },
@@ -1139,10 +1159,10 @@ export default function PartyDetailScreen() {
             (party.flyer_url.startsWith("http") ||
               party.flyer_url.startsWith("https")) ? (
             <View style={{ aspectRatio: 4 / 5 }} className="w-full relative">
-              <RNImage
+              <Image
                 source={{ uri: party.flyer_url }}
-                className="w-full h-full"
-                resizeMode="cover"
+                style={{ width: "100%", height: "100%" }}
+                contentFit="cover"
               />
               <LinearGradient
                 colors={[
@@ -1533,6 +1553,29 @@ export default function PartyDetailScreen() {
                 <Ionicons name="share-social-outline" size={26} color="#fff" />
               </TouchableOpacity>
             </View>
+
+            {/* Review Button */}
+            {!isEditing && party.has_ticket && eventEnded && (
+              <TouchableOpacity
+                onPress={() => router.push({ pathname: "/party/[id]/review", params: { id: partyId } })}
+                disabled={party.has_reviewed}
+                className={`flex-row items-center px-4 py-2 rounded-xl border ${
+                  party.has_reviewed 
+                    ? "bg-green-500/10 border-green-500/30" 
+                    : "bg-purple-600/20 border-purple-600/30"
+                }`}
+              >
+                <Ionicons 
+                  name={party.has_reviewed ? "checkmark-circle" : "star-outline"} 
+                  size={18} 
+                  color={party.has_reviewed ? "#22c55e" : "#a855f7"} 
+                />
+                <Text className={`font-bold ml-2 ${party.has_reviewed ? "text-green-400" : "text-purple-400"}`}>
+                  {party.has_reviewed ? "Review Left" : "Rate Party"}
+                </Text>
+              </TouchableOpacity>
+            )}
+
 
             {isEditing && (
               <View className="flex-row items-center gap-3">

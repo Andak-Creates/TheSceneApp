@@ -6,7 +6,6 @@ import React, { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -15,6 +14,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { Image } from "expo-image";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "../../stores/authStore";
 import { useUserStore } from "../../stores/userStore";
@@ -299,7 +299,11 @@ export default function HostProfileSetupScreen() {
           <View>
             <TouchableOpacity onPress={handlePickImage} className="items-center mb-8">
               {avatarUri ? (
-                <Image source={{ uri: avatarUri }} className="w-32 h-32 rounded-full" />
+                <Image
+                  source={{ uri: avatarUri }}
+                  style={{ width: 128, height: 128, borderRadius: 64 }}
+                  contentFit="cover"
+                />
               ) : (
                 <View className="w-32 h-32 rounded-full bg-white/5 border-2 border-dashed border-white/10 items-center justify-center">
                   <Ionicons name="camera" size={40} color="#666" />

@@ -9,6 +9,7 @@ const corsHeaders = {
 
 interface TicketEmailPayload {
   ticketId: string;
+  partyId: string;
   guestEmail: string;
   guestName: string;
   partyTitle: string;
@@ -45,13 +46,14 @@ function formatTime(dateString: string | null): string {
 
 function buildEmailHtml(payload: TicketEmailPayload): string {
   const {
-    ticketId, guestName, partyTitle, partyDate, partyLocation,
+    ticketId, partyId, guestName, partyTitle, partyDate, partyLocation,
     partyCity, tierName, quantity, totalPaid, currency,
   } = payload;
 
   const ticketUrl = `${SITE_URL}/ticket/${ticketId}`;
-  // 300px wide QR — rendered on white background for maximum scannability
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${ticketId}&bgcolor=FFFFFF&color=000000&margin=2&qzone=2`;
+  // Encode the same JSON structure the app's QR scanner expects
+  const qrPayload = encodeURIComponent(JSON.stringify({ ticketId, partyId }));
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${qrPayload}&bgcolor=FFFFFF&color=000000&margin=2&qzone=2`;
   const locationDisplay = [partyLocation, partyCity].filter(Boolean).join(", ") || "Location TBA";
   const dateDisplay = formatDate(partyDate);
   const timeDisplay = formatTime(partyDate);
@@ -128,7 +130,7 @@ function buildEmailHtml(payload: TicketEmailPayload): string {
                       </td>
                       <td width="50%" style="vertical-align:top;">
                         <p style="margin:0 0 3px;font-size:11px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:1px;">Total Paid</p>
-                        <p style="margin:0;font-size:16px;font-weight:700;color:#a855f7;">${formatCurrency(totalPaid, currency)}</p>
+                        <p style="margin:0;font-size:16px;font-weight:700;color:#a855f7;">${totalPaid === 0 ? 'Free' : formatCurrency(totalPaid, currency)}</p>
                       </td>
                     </tr>
                   </table>
@@ -223,9 +225,9 @@ Deno.serve(async (req) => {
   try {
     const payload: TicketEmailPayload = await req.json();
 
-    const { ticketId, guestEmail, guestName, partyTitle } = payload;
+    const { ticketId, partyId, guestEmail, guestName, partyTitle } = payload;
 
-    if (!ticketId || !guestEmail || !guestName || !partyTitle) {
+    if (!ticketId || !partyId || !guestEmail || !guestName || !partyTitle) {
       return new Response(
         JSON.stringify({ error: "Missing required fields" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -241,12 +243,11 @@ Deno.serve(async (req) => {
         "Authorization": `Bearer ${RESEND_API_KEY}`,
       },
       body: JSON.stringify({
-        // TODO: Replace with your verified Resend domain address e.g. tickets@thescenehq.com
-        from: "TheScene Tickets <onboarding@resend.dev>",
+        from: "TheScene Tickets <tickets@thesceneapp.online>",
         to: [guestEmail],
         subject: `Your ticket for ${partyTitle}`,
         html,
-        reply_to: "support@thescenehq.com",
+        reply_to: "thesceneappsupport@gmail.com",
       }),
     });
 

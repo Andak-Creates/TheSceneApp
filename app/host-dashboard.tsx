@@ -372,19 +372,26 @@ export default function HostDashboardScreen() {
     try {
       console.log("📱 RAW QR Code data:", data);
 
-      // Parse QR code data
-      let qrData;
+      // Parse QR code data — supports both JSON { ticketId, partyId } and plain UUID fallback
+      let qrData: { ticketId?: string; partyId?: string; userId?: string };
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       try {
         qrData = JSON.parse(data);
         console.log("📦 Parsed QR data:", JSON.stringify(qrData, null, 2));
-      } catch (parseError) {
-        console.error("❌ Failed to parse QR code:", parseError);
-        setScanResult({
-          success: false,
-          message: "Invalid QR code format",
-        });
-        setTimeout(() => setScanning(false), 3000);
-        return;
+      } catch {
+        // If parse fails, check if raw data is a plain UUID (legacy web ticket)
+        if (uuidRegex.test(data.trim())) {
+          console.log("📦 Plain UUID QR detected, treating as ticketId");
+          qrData = { ticketId: data.trim() };
+        } else {
+          console.error("❌ Failed to parse QR code:", data);
+          setScanResult({
+            success: false,
+            message: "Invalid QR code format",
+          });
+          setTimeout(() => setScanning(false), 3000);
+          return;
+        }
       }
 
       const { ticketId, partyId, userId } = qrData;

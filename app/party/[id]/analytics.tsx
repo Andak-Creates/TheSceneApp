@@ -152,6 +152,8 @@ export default function PartyAnalyticsScreen() {
           `
           id,
           user_id,
+          guest_name,
+          guest_email,
           quantity_purchased,
           quantity_used,
           purchased_at,
@@ -223,6 +225,8 @@ export default function PartyAnalyticsScreen() {
             buyer_name:
               (ticket.profiles as any)?.full_name ||
               (ticket.profiles as any)?.username ||
+              (ticket as any).guest_name ||
+              (ticket as any).guest_email ||
               "Unknown",
             buyer_avatar: (ticket.profiles as any)?.avatar_url || null,
             quantity_purchased: ticket.quantity_purchased,
@@ -294,6 +298,8 @@ export default function PartyAnalyticsScreen() {
           buyer_name:
             (ticket?.profiles as any)?.full_name ||
             (ticket?.profiles as any)?.username ||
+            (ticket as any)?.guest_name ||
+            (ticket as any)?.guest_email ||
             "Unknown",
           buyer_avatar: (ticket?.profiles as any)?.avatar_url || null,
           checked_in_at: checkIn.checked_in_at,

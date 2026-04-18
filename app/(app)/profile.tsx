@@ -1,12 +1,12 @@
 import { FontAwesome6, Ionicons } from "@expo/vector-icons";
 import { decode } from "base64-arraybuffer";
+import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
-import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Image as RNImage,
   RefreshControl,
   ScrollView,
   Text,
@@ -40,7 +40,7 @@ export default function ProfileScreen() {
   const [repostedParties, setRepostedParties] = useState<any[]>([]);
   const [upcomingParties, setUpcomingParties] = useState<any[]>([]);
   const [pastParties, setPastParties] = useState<any[]>([]);
-  const [favoritedParties, setFavoritedParties] = useState<any[]>([]);
+  const [savedParties, setSavedParties] = useState<any[]>([]);
 
   const [stats, setStats] = useState<Stats>({
     partiesAttended: 0,
@@ -128,13 +128,13 @@ export default function ProfileScreen() {
         return true;
       });
 
-      // Favorites (party_likes)
-      const { data: likedData } = await supabase
-        .from("party_likes")
+      // Saved / Bookmarked parties
+      const { data: bookmarkData } = await supabase
+        .from("party_bookmarks")
         .select(`party:parties(*, party_media(thumbnail_url, media_type, is_primary))`)
         .eq("user_id", user.id)
         .order("created_at", { ascending: false });
-      const favorites = (likedData || []).map((l: any) => l.party).filter(Boolean).map((p: any) => {
+      const saved = (bookmarkData || []).map((b: any) => b.party).filter(Boolean).map((p: any) => {
         const mediaRows: any[] = p.party_media || [];
         const primaryMedia = mediaRows.find((m: any) => m.is_primary) || mediaRows[0];
         return {
@@ -144,7 +144,7 @@ export default function ProfileScreen() {
       });
 
       // Batch fetch view counts for all unique party IDs in one query
-      const allParties = [...hostedAll, ...ticketParties, ...reposts, ...favorites];
+      const allParties = [...hostedAll, ...ticketParties, ...reposts, ...saved];
       const uniqueIds = [...new Set(allParties.map((p: any) => p.id).filter(Boolean))];
       let viewsMap: Record<string, number> = {};
       if (uniqueIds.length > 0) {
@@ -158,9 +158,17 @@ export default function ProfileScreen() {
       }
       const addViews = (arr: any[]) => arr.map((p) => ({ ...p, views_count: viewsMap[p.id] || 0 }));
 
+      // Reviews (to hide rate button for those already reviewed)
+      const { data: userReviews } = await supabase
+        .from("reviews")
+        .select("party_id")
+        .eq("reviewer_id", user.id);
+      const reviewedPartyIds = new Set((userReviews || []).map((r: any) => r.party_id));
+
       setHostedParties(addViews(hostedAll));
       setRepostedParties(addViews(reposts));
       setUpcomingParties(addViews(deduped));
+
       // Past = ticket-attended past parties + hosted past parties (for hosts), deduplicated
       const ticketPast = ticketParties.filter((p: any) => !p.date_tba && p.date && new Date(p.date) < now);
       const hostedPast = hostedAll.filter((p: any) => !p.date_tba && p.date && new Date(p.date) < now);
@@ -171,8 +179,16 @@ export default function ProfileScreen() {
         pastSeen.add(p.id);
         return true;
       });
-      setPastParties(addViews(dedupedPast));
-      setFavoritedParties(addViews(favorites));
+
+      // Mark which past parties can be reviewed (user had ticket and hasn't reviewed yet)
+      const ticketPastIds = new Set(ticketPast.map(p => p.id));
+      const pastWithReviewState = dedupedPast.map(p => ({
+        ...p,
+        can_review: ticketPastIds.has(p.id) && !reviewedPartyIds.has(p.id)
+      }));
+
+      setPastParties(addViews(pastWithReviewState));
+      setSavedParties(addViews(saved));
     } catch (e) {
       console.error("Failed to fetch tab data:", e);
     }
@@ -200,6 +216,57 @@ export default function ProfileScreen() {
     };
     checkHostAdmin();
   }, [user, profile]);
+
+  // Silent re-fetch every time the screen comes into focus
+  const isFirstFocus = useRef(true);
+  useFocusEffect(
+    useCallback(() => {
+      // Skip the very first focus — the useEffect above already handles the initial load
+      if (isFirstFocus.current) {
+        isFirstFocus.current = false;
+        return;
+      }
+      if (!user) return;
+      fetchUserStats();
+      fetchAllTabData();
+    }, [user])
+  );
+
+  // Supabase Realtime — live updates while the screen is open
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel(`profile-realtime-${user.id}`)
+      // Follower / following changes
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "follows", filter: `following_id=eq.${user.id}` },
+        () => fetchUserStats()
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "follows", filter: `follower_id=eq.${user.id}` },
+        () => fetchUserStats()
+      )
+      // Bookmark / save changes
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "party_bookmarks", filter: `user_id=eq.${user.id}` },
+        () => fetchAllTabData()
+      )
+      // Repost changes
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "party_reposts", filter: `user_id=eq.${user.id}` },
+        () => fetchAllTabData()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
 
   const fetchUserCity = async () => {
     if (!user) return;
@@ -320,14 +387,12 @@ export default function ProfileScreen() {
     }
   };
 
-  // ✅ ADD REFRESH HANDLER
   const handleRefresh = async () => {
     if (!user) return;
     setRefreshing(true);
-    // Fetching the profile will update the userStore,
-    // which triggers the useEffect and subsequent data fetches.
     await fetchProfile(user.id);
-    fetchUserStats();
+    fetchUserStats();        // refetches stats (also clears refreshing spinner)
+    fetchAllTabData();       // refetches all party lists
   };
 
   const handleAvatarChange = async () => {
@@ -521,10 +586,10 @@ export default function ProfileScreen() {
           className="w-[100px] mx-auto mb-4"
         >
           {profile.avatar_url ? (
-            <RNImage
+            <Image
               source={{ uri: profile.avatar_url }}
               style={{ width: 96, height: 96, borderRadius: 48, alignSelf: "center" }}
-              resizeMode="cover"
+              contentFit="cover"
             />
           ) : (
             <View className="w-24 h-24 rounded-full bg-purple-600 self-center items-center justify-center">
@@ -731,6 +796,25 @@ export default function ProfileScreen() {
           )}
         </View>
 
+        {/* Referral Code Display */}
+        {!editMode && profile.referral_code && (
+           <View className="flex-row items-center justify-between bg-purple-600/20 border border-purple-500/30 rounded-2xl p-4 mt-6 mx-1">
+             <View>
+               <Text className="text-purple-400 text-[10px] font-bold uppercase tracking-widest mb-1">Your Referral Code</Text>
+               <Text className="text-white text-xl font-mono font-extrabold tracking-wider">{profile.referral_code}</Text>
+             </View>
+             <TouchableOpacity 
+               onPress={() => Alert.alert(
+                 "Share Your Code!", 
+                 `Tell your friends to use code ${profile.referral_code} when signing up!`
+               )}
+               className="bg-purple-600 px-5 py-2.5 rounded-xl"
+             >
+               <Text className="text-white text-xs font-bold">Share</Text>
+             </TouchableOpacity>
+           </View>
+        )}
+
         {/* Host Dashboard Button - Only shows if user is a host */}
         {profile.is_host && (
           <View className="gap-3 mt-6">
@@ -835,7 +919,7 @@ export default function ProfileScreen() {
         <View className="pb-32 mt-6">
           {(() => {
             // Shared mini-card grid renderer
-            const renderGrid = (parties: any[], emptyIcon: any, emptyTitle: string, emptySubtitle: string) => {
+            const renderGrid = (parties: any[], emptyIcon: any, emptyTitle: string, emptySubtitle: string, showReview = false) => {
               if (parties.length === 0) {
                 return (
                   <View className="items-center py-16">
@@ -854,7 +938,13 @@ export default function ProfileScreen() {
                   {rows.map((row, ri) => (
                     <View key={ri} className="flex-row gap-3">
                       {row.map((party: any) => (
-                        <PartyCard key={party.id} party={party} />
+                        <PartyCard 
+                          key={party.id} 
+                          party={party} 
+                          onReviewPress={showReview && party.can_review ? () => {
+                            router.push({ pathname: "/party/[id]/review", params: { id: party.id } });
+                          } : undefined}
+                        />
                       ))}
                       {row.length === 1 && <View style={{ flex: 1 }} />}
                     </View>
@@ -873,7 +963,7 @@ export default function ProfileScreen() {
               return renderGrid(upcomingParties, "calendar", "No upcoming parties", "Parties you have tickets to will show here");
             }
             if (activeTab === "past") {
-              return renderGrid(pastParties, "ticket", "No past parties", "Past events you attended will appear here");
+              return renderGrid(pastParties, "ticket", "No past parties", "Past events you attended will appear here", true);
             }
             if (activeTab === "favorites") {
               return (
@@ -882,7 +972,7 @@ export default function ProfileScreen() {
                     <Ionicons name="lock-closed-outline" size={14} color="#a855f7" />
                     <Text className="text-purple-300 text-xs ml-2 font-medium">Only you can see your saved parties</Text>
                   </View>
-                  {renderGrid(favoritedParties, "heart-outline", "No saved parties yet", "Like a party to save it here for later")}
+                  {renderGrid(savedParties, "bookmark-outline", "No saved parties yet", "Bookmark a party to save it here for later")}
                 </>
               );
             }

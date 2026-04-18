@@ -4,7 +4,7 @@ export default {
   expo: {
     name: IS_DEV ? "TheScene (Dev)" : "TheScene",
     slug: "TheScene",
-    version: "1.0.0",
+    version: "1.0.2",
     orientation: "portrait",
     icon: "./assets/images/thescene-logo.png",
     scheme: "thescene",
@@ -82,5 +82,11 @@ export default {
         projectId: "1a11e3b7-a90c-4fe3-9a4a-9c73ae26aa22",
       },
     },
+    updates: {
+      url: "https://u.expo.dev/1a11e3b7-a90c-4fe3-9a4a-9c73ae26aa22"
+    },
+    runtimeVersion: {
+      policy: "appVersion"
+    }
   },
 };

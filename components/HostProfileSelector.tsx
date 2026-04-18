@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -8,7 +9,6 @@ import {
   Text,
   TouchableOpacity,
   View,
-  Image as RNImage,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import { useAuthStore } from "../stores/authStore";
@@ -70,9 +70,10 @@ export default function HostProfileSelector({
       activeOpacity={0.8}
     >
       {item.avatar_url ? (
-        <RNImage
+        <Image
           source={{ uri: item.avatar_url }}
-          className="w-12 h-12 rounded-full"
+          style={{ width: 48, height: 48, borderRadius: 24 }}
+          contentFit="cover"
         />
       ) : (
         <View className="w-12 h-12 rounded-full bg-purple-600 items-center justify-center">

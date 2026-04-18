@@ -317,6 +317,7 @@ const handleSubmitComment = async () => {
           onViewReplies={handleViewReplies}
           currentUserId={user?.id}
           partyHostId={partyHostId || undefined}
+          partyHostProfile={partyHostId ? hostProfileMap[partyHostId] : null}
           isExpanded={expandedComments.has(item.id)}
         />
       </View>

@@ -7,7 +7,9 @@ import {
     Alert,
     FlatList,
     RefreshControl,
+    ScrollView,
     Text,
+    TextInput,
     TouchableOpacity,
     View,
 } from "react-native";
@@ -51,7 +53,27 @@ interface HostVerification {
   };
 }
 
-type TabType = "withdrawals" | "verifications";
+interface Agent {
+  id: string;
+  code: string;
+  window_start_date: string;
+  exit_date: string | null;
+  created_at: string;
+}
+
+interface ReferralInfo {
+  id: string;
+  referred_by_code: string;
+  referred_user_id: string;
+  created_at: string;
+  profile: {
+    username: string;
+    full_name: string;
+    is_host: boolean;
+  };
+}
+
+type TabType = "withdrawals" | "verifications" | "referrals";
 
 export default function AdminConsole() {
   const router = useRouter();
@@ -59,16 +81,55 @@ export default function AdminConsole() {
   const [tab, setTab] = useState<TabType>("withdrawals");
   const [requests, setRequests] = useState<WithdrawalRequest[]>([]);
   const [verifications, setVerifications] = useState<HostVerification[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [referrals, setReferrals] = useState<ReferralInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [processingVerificationId, setProcessingVerificationId] = useState<string | null>(null);
+  const [newAgentUsername, setNewAgentUsername] = useState("");
+  const [newAgentCode, setNewAgentCode] = useState("");
+  const [addingAgent, setAddingAgent] = useState(false);
 
   useEffect(() => {
     checkAdmin();
     fetchRequests();
     fetchVerifications();
+    fetchAgentsAndReferrals();
   }, []);
+
+  const fetchAgentsAndReferrals = async () => {
+    try {
+      const { data: agData } = await supabase.from('agents').select('*').order('created_at', { ascending: false });
+      if (agData) setAgents(agData);
+
+      const { data: refData } = await supabase.from('referrals').select('*, profile:profiles!referred_user_id(username, full_name, is_host)');
+      if (refData) setReferrals(refData as any);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const getCommissionStatus = (agent: Agent, ref: ReferralInfo) => {
+     const now = new Date();
+     const agentExit = agent.exit_date ? new Date(agent.exit_date) : null;
+     
+     if (agentExit) {
+        const monthsSinceExit = (now.getTime() - agentExit.getTime()) / (1000 * 60 * 60 * 24 * 30);
+        if (monthsSinceExit > 12) return { text: "EXPIRED (Agent Exited)", color: "text-red-500" };
+     }
+  
+     const refStart = new Date(ref.created_at);
+     const monthsSinceRef = (now.getTime() - refStart.getTime()) / (1000 * 60 * 60 * 24 * 30);
+  
+     if (monthsSinceRef <= 12) {
+        return ref.profile?.is_host 
+          ? { text: "TIER 1 (30% HOST)", color: "text-green-500" } 
+          : { text: "TIER 1 (20% USER)", color: "text-green-500" };
+     } else {
+        return { text: "TIER 2 (10% ONGOING)", color: "text-amber-500" };
+     }
+  };
 
   const checkAdmin = async () => {
     const { data: profile } = await supabase
@@ -80,6 +141,54 @@ export default function AdminConsole() {
     if (!profile?.is_admin) {
       Alert.alert("Access Denied", "You do not have permission to view this page.");
       router.replace("/host-dashboard");
+    }
+  };
+
+  const handleAddAgent = async () => {
+    if (!newAgentUsername.trim() || !newAgentCode.trim()) {
+      Alert.alert("Error", "Please fill in both fields");
+      return;
+    }
+    setAddingAgent(true);
+    
+    try {
+      const { data: userProfile } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("username", newAgentUsername.trim().toLowerCase())
+        .single();
+        
+      if (!userProfile) {
+        Alert.alert("Error", "User not found with that username");
+        setAddingAgent(false);
+        return;
+      }
+      
+      const { error: profileError } = await supabase
+        .from("profiles")
+        .update({ referral_code: newAgentCode.trim().toUpperCase() })
+        .eq("id", userProfile.id);
+        
+      if (profileError) throw profileError;
+      
+      const { error: agentError } = await supabase
+        .from("agents")
+        .insert({
+          user_id: userProfile.id,
+          code: newAgentCode.trim().toUpperCase()
+        });
+        
+      if (agentError) throw agentError;
+      
+      Alert.alert("Success", "Ambassador created!");
+      setNewAgentUsername("");
+      setNewAgentCode("");
+      fetchAgentsAndReferrals();
+    } catch (e: any) {
+      console.error(e);
+      Alert.alert("Error", e.message || "Failed to create ambassador.");
+    } finally {
+      setAddingAgent(false);
     }
   };
 
@@ -410,21 +519,29 @@ export default function AdminConsole() {
       </View>
 
       {/* Tabs */}
-      <View className="flex-row mx-6 mt-4 mb-2">
+      <View className="flex-row mx-6 mt-4 mb-2 bg-white/5 p-1 rounded-xl">
         <TouchableOpacity
           onPress={() => setTab("withdrawals")}
-          className={`flex-1 py-3 rounded-xl mr-2 ${tab === "withdrawals" ? "bg-purple-600" : "bg-white/5"}`}
+          className={`flex-1 py-3 rounded-lg ${tab === "withdrawals" ? "bg-purple-600" : ""}`}
         >
-          <Text className={`text-center font-bold ${tab === "withdrawals" ? "text-white" : "text-gray-400"}`}>
+          <Text className={`text-center font-bold text-xs ${tab === "withdrawals" ? "text-white" : "text-gray-400"}`}>
             Withdrawals
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
           onPress={() => setTab("verifications")}
-          className={`flex-1 py-3 rounded-xl ${tab === "verifications" ? "bg-purple-600" : "bg-white/5"}`}
+          className={`flex-1 py-3 rounded-lg ${tab === "verifications" ? "bg-purple-600" : ""}`}
         >
-          <Text className={`text-center font-bold ${tab === "verifications" ? "text-white" : "text-gray-400"}`}>
+          <Text className={`text-center font-bold text-xs ${tab === "verifications" ? "text-white" : "text-gray-400"}`}>
             Verifications
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => setTab("referrals")}
+          className={`flex-1 py-3 rounded-lg ${tab === "referrals" ? "bg-purple-600" : ""}`}
+        >
+          <Text className={`text-center font-bold text-xs ${tab === "referrals" ? "text-white" : "text-gray-400"}`}>
+            Ambassadors
           </Text>
         </TouchableOpacity>
       </View>
@@ -433,6 +550,79 @@ export default function AdminConsole() {
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator size="large" color="#8B5CF6" />
         </View>
+      ) : tab === "referrals" ? (
+         <ScrollView className="px-6 mt-4 pb-20">
+             {/* Add Ambassador Form */}
+             <View className="bg-white/5 p-5 mb-6 rounded-3xl border border-white/10">
+                <Text className="text-white font-bold text-lg mb-4">Create Ambassador</Text>
+                <TextInput
+                   className="bg-white/10 border border-white/20 rounded-xl h-12 px-4 text-white mb-2"
+                   placeholder="Username (e.g. taz)"
+                   placeholderTextColor="#666"
+                   autoCapitalize="none"
+                   value={newAgentUsername}
+                   onChangeText={setNewAgentUsername}
+                />
+                <TextInput
+                   className="bg-white/10 border border-white/20 rounded-xl h-12 px-4 text-white mb-3"
+                   placeholder="Vanity Code (e.g. TAZ)"
+                   placeholderTextColor="#666"
+                   autoCapitalize="characters"
+                   value={newAgentCode}
+                   onChangeText={setNewAgentCode}
+                />
+                <TouchableOpacity 
+                   onPress={handleAddAgent}
+                   disabled={addingAgent}
+                   className="bg-purple-600 rounded-xl h-12 items-center justify-center flex-row"
+                >
+                   {addingAgent ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-bold">Add Ambassador</Text>}
+                </TouchableOpacity>
+             </View>
+
+            {agents.length === 0 && (
+              <View className="mt-20 items-center">
+                <Ionicons name="people-outline" size={64} color="#333" />
+                <Text className="text-gray-500 text-center mt-4">No ambassadors registered.</Text>
+              </View>
+            )}
+            {agents.map(agent => (
+               <View key={agent.id} className="bg-white/5 p-5 mb-4 rounded-3xl border border-white/10">
+                  <View className="flex-row justify-between items-center mb-3">
+                     <Text className="text-white font-bold text-xl">{agent.code}</Text>
+                     <View className="bg-green-500/20 px-3 py-1 rounded-full">
+                        <Text className="text-green-500 text-xs font-bold font-mono">ACTIVE</Text>
+                     </View>
+                  </View>
+                  <View className="flex-row items-center border-b border-white/10 pb-4 mb-4 gap-4">
+                     <View>
+                        <Text className="text-gray-400 text-xs uppercase font-bold">Start Date</Text>
+                        <Text className="text-white text-sm mt-1">{new Date(agent.window_start_date).toLocaleDateString()}</Text>
+                     </View>
+                     <View>
+                        <Text className="text-gray-400 text-xs uppercase font-bold">Total Referrals</Text>
+                        <Text className="text-white text-sm mt-1">{referrals.filter(r => r.referred_by_code === agent.code).length}</Text>
+                     </View>
+                  </View>
+                  <Text className="text-purple-400 text-xs font-bold uppercase mb-2">Referred Users</Text>
+                  {referrals.filter(r => r.referred_by_code === agent.code).map(ref => {
+                     const status = getCommissionStatus(agent, ref);
+                     return (
+                       <View key={ref.id} className="flex-row justify-between items-center bg-black/20 p-3 rounded-xl mb-2">
+                          <View>
+                             <Text className="text-white font-semibold flex-row items-center">
+                               {ref.profile?.full_name || ref.profile?.username}
+                               {ref.profile?.is_host && <Text className="text-purple-400 text-[10px]"> (HOST)</Text>}
+                             </Text>
+                             <Text className="text-gray-500 text-xs mt-0.5">Joined {new Date(ref.created_at).toLocaleDateString()}</Text>
+                          </View>
+                          <Text className={`${status.color} text-[10px] font-bold font-mono`}>{status.text}</Text>
+                       </View>
+                     );
+                  })}
+               </View>
+            ))}
+         </ScrollView>
       ) : tab === "verifications" ? (
         <FlatList
           data={verifications}

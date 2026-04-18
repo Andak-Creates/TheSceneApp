@@ -3,7 +3,9 @@ import MediaGalleryUploader from "@/components/MediaGalleryUploader";
 import TBAToggle from "@/components/TBAToggle";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import { decode } from "base64-arraybuffer";
 import { Image as ExpoImage } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
@@ -102,6 +104,14 @@ export default function CreatePartyScreen() {
   const [loadingProfiles, setLoadingProfiles] = useState(true);
   const [refreshingProfiles, setRefreshingProfiles] = useState(false);
 
+  // Inline Create Profile Modal
+  const [showCreateProfileModal, setShowCreateProfileModal] = useState(false);
+  const [newProfileName, setNewProfileName] = useState("");
+  const [newProfileBio, setNewProfileBio] = useState("");
+  const [newProfileAvatarUri, setNewProfileAvatarUri] = useState<string | null>(null);
+  const [newProfileAvatarBase64, setNewProfileAvatarBase64] = useState<string | null>(null);
+  const [savingProfile, setSavingProfile] = useState(false);
+
   const fetchHostProfiles = async (showRefreshing = false) => {
     if (!user) return;
     if (showRefreshing) setRefreshingProfiles(true);
@@ -123,6 +133,76 @@ export default function CreatePartyScreen() {
       console.error("Failed to fetch host profiles:", err);
     } finally {
       setRefreshingProfiles(false);
+    }
+  };
+
+  const openCreateProfileModal = () => {
+    setNewProfileName("");
+    setNewProfileBio("");
+    setNewProfileAvatarUri(null);
+    setNewProfileAvatarBase64(null);
+    setShowCreateProfileModal(true);
+  };
+
+  const handlePickProfileAvatar = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+      base64: true,
+    });
+    if (!result.canceled && result.assets[0].uri) {
+      setNewProfileAvatarUri(result.assets[0].uri);
+      setNewProfileAvatarBase64(result.assets[0].base64 || null);
+    }
+  };
+
+  const handleCreateProfile = async () => {
+    if (!user) return;
+    if (!newProfileName.trim()) {
+      Alert.alert("Required", "Please enter a name for your host profile");
+      return;
+    }
+    setSavingProfile(true);
+    try {
+      let publicUrl: string | null = null;
+      if (newProfileAvatarBase64) {
+        const fileExt = newProfileAvatarUri?.split(".").pop() || "jpg";
+        const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+        const filePath = `${user.id}/host-profiles/${fileName}`;
+        const { error: uploadError } = await supabase.storage
+          .from("avatars")
+          .upload(filePath, decode(newProfileAvatarBase64), {
+            contentType: `image/${fileExt}`,
+            upsert: true,
+          });
+        if (uploadError) throw uploadError;
+        const { data } = supabase.storage.from("avatars").getPublicUrl(filePath);
+        publicUrl = data.publicUrl;
+      }
+
+      const { data: newProfile, error } = await supabase
+        .from("host_profiles")
+        .insert({
+          owner_id: user.id,
+          name: newProfileName.trim(),
+          bio: newProfileBio.trim() || null,
+          avatar_url: publicUrl,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Add new profile to list and auto-select it
+      setHostProfiles((prev) => [...prev, newProfile]);
+      setSelectedHostProfile(newProfile.id);
+      setShowCreateProfileModal(false);
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Failed to create host profile");
+    } finally {
+      setSavingProfile(false);
     }
   };
 
@@ -151,7 +231,7 @@ export default function CreatePartyScreen() {
             .maybeSingle();
 
           if (verification?.status !== "approved") {
-            router.replace("/(app)/host-verification");
+            router.replace("/(app)/host-verification?from=createParty");
             return;
           }
         }
@@ -598,6 +678,7 @@ export default function CreatePartyScreen() {
                 </Text>
               </View>
               <MediaGalleryUploader
+                initialMedia={mediaGallery}
                 onMediaChange={setMediaGallery}
                 maxImages={10}
                 maxVideos={3}
@@ -657,7 +738,7 @@ export default function CreatePartyScreen() {
                       </TouchableOpacity>
                     ))}
                     <TouchableOpacity
-                      onPress={() => router.push("/(app)/host-profile-setup")}
+                      onPress={openCreateProfileModal}
                       className="px-4 py-2 rounded-xl border border-dashed border-white/20 bg-white/5"
                     >
                       <Text className="text-gray-400 font-medium">
@@ -668,7 +749,7 @@ export default function CreatePartyScreen() {
                 ) : (
                   <View>
                     <TouchableOpacity
-                      onPress={() => router.push("/(app)/host-profile-setup")}
+                      onPress={openCreateProfileModal}
                       className="bg-purple-600/20 border border-dashed border-purple-500/50 rounded-xl p-4 items-center mb-3"
                     >
                       <Ionicons name="add-circle" size={24} color="#a855f7" />
@@ -1406,6 +1487,97 @@ export default function CreatePartyScreen() {
           </View>
         </View>
       </ScrollView>
+
+      {/* Inline Create Host Profile Modal */}
+      <Modal
+        visible={showCreateProfileModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowCreateProfileModal(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          className="flex-1"
+        >
+          <View className="flex-1 justify-end bg-black/70">
+            <View className="bg-[#130920] rounded-t-3xl pt-6 pb-10 px-6">
+              {/* Handle */}
+              <View className="w-10 h-1 bg-white/20 rounded-full self-center mb-6" />
+
+              {/* Header */}
+              <View className="flex-row items-center justify-between mb-6">
+                <Text className="text-white text-2xl font-extrabold">New Host Profile</Text>
+                <TouchableOpacity
+                  onPress={() => setShowCreateProfileModal(false)}
+                  className="w-9 h-9 bg-white/10 rounded-full items-center justify-center"
+                >
+                  <Ionicons name="close" size={20} color="#fff" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                {/* Avatar Picker */}
+                <TouchableOpacity onPress={handlePickProfileAvatar} className="items-center mb-6">
+                  {newProfileAvatarUri ? (
+                    <ExpoImage
+                      source={{ uri: newProfileAvatarUri }}
+                      style={{ width: 96, height: 96, borderRadius: 48 }}
+                    />
+                  ) : (
+                    <View className="w-24 h-24 rounded-full bg-white/5 border-2 border-dashed border-white/20 items-center justify-center">
+                      <Ionicons name="camera" size={32} color="#666" />
+                      <Text className="text-gray-500 text-xs mt-1">Add Photo</Text>
+                    </View>
+                  )}
+                  <Text className="text-purple-400 text-sm font-semibold mt-2">
+                    {newProfileAvatarUri ? "Change Photo" : "Upload Logo"}
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Name */}
+                <View className="mb-4">
+                  <Text className="text-gray-400 text-sm font-semibold mb-2">Brand Name *</Text>
+                  <TextInput
+                    className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white"
+                    placeholder="e.g. Night Owl Events"
+                    placeholderTextColor="#666"
+                    value={newProfileName}
+                    onChangeText={setNewProfileName}
+                  />
+                </View>
+
+                {/* Bio */}
+                <View className="mb-6">
+                  <Text className="text-gray-400 text-sm font-semibold mb-2">Bio (Optional)</Text>
+                  <TextInput
+                    className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white"
+                    placeholder="Tell people about your brand"
+                    placeholderTextColor="#666"
+                    value={newProfileBio}
+                    onChangeText={setNewProfileBio}
+                    multiline
+                    numberOfLines={3}
+                    textAlignVertical="top"
+                  />
+                </View>
+
+                {/* Save Button */}
+                <TouchableOpacity
+                  onPress={handleCreateProfile}
+                  disabled={savingProfile}
+                  className="bg-purple-600 py-4 rounded-2xl items-center"
+                >
+                  {savingProfile ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text className="text-white font-bold text-lg">Create Profile</Text>
+                  )}
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }

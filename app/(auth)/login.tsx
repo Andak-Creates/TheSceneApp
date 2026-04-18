@@ -204,14 +204,14 @@ export default function LoginScreen() {
                 By continuing, you agree to our{" "}
                 <Text
                   className="text-gray-300 underline"
-                  onPress={() => Linking.openURL("https://thescene.vercel.app/terms-of-service")}
+                  onPress={() => Linking.openURL("https://thesceneapp.online/terms-of-service")}
                 >
                   Terms of Service
                 </Text>{" "}
                 and{" "}
                 <Text
                   className="text-gray-300 underline"
-                  onPress={() => Linking.openURL("https://thescene.vercel.app/privacy-policy")}
+                  onPress={() => Linking.openURL("https://thesceneapp.online/privacy-policy")}
                 >
                   Privacy Policy
                 </Text>

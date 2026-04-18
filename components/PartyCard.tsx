@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image as ExpoImage } from "expo-image";
 import { useRouter } from "expo-router";
 import { Text, TouchableOpacity, View } from "react-native";
+import { shareParty } from "../lib/share";
 
 export interface PartyCardItem {
   id: string;
@@ -17,6 +18,7 @@ export interface PartyCardItem {
 
 interface PartyCardProps {
   party: PartyCardItem;
+  onReviewPress?: () => void;
 }
 
 /** Returns true if the URL looks like a raw video file (not an image) */
@@ -52,9 +54,14 @@ function formatDate(dateString: string | null | undefined): string {
   });
 }
 
-export default function PartyCard({ party }: PartyCardProps) {
+export default function PartyCard({ party, onReviewPress }: PartyCardProps) {
   const router = useRouter();
   const preview = resolvePreviewUri(party.flyer_url, party.thumbnail_url);
+
+  const handleShare = async (e: any) => {
+    e.stopPropagation();
+    await shareParty(party.id, party.title);
+  };
 
   const renderHostPill = () => {
     if (!party.host_profile?.name) return null;
@@ -120,11 +127,30 @@ export default function PartyCard({ party }: PartyCardProps) {
               </Text>
             </View>
           ) : null}
-          <View className="flex-row items-center">
-            <Ionicons name="eye-outline" size={10} color="#6b7280" />
-            <Text className="text-gray-500 text-[10px] ml-1">
-              {party.views_count || 0} views
-            </Text>
+          <View className="flex-row items-center justify-between mt-auto">
+            <View className="flex-row items-center">
+              <Ionicons name="eye-outline" size={10} color="#6b7280" />
+              <Text className="text-gray-500 text-[10px] ml-1">
+                {party.views_count || 0}
+              </Text>
+            </View>
+
+            <View className="flex-row items-center gap-2">
+              {onReviewPress && (
+                <TouchableOpacity 
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    onReviewPress();
+                  }}
+                  className="bg-purple-600/20 px-2 py-1 rounded-md border border-purple-500/30"
+                >
+                  <Text className="text-purple-400 text-[9px] font-bold">Rate Party</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity onPress={handleShare} hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}>
+                <Ionicons name="share-social-outline" size={14} color="#6b7280" />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </View>

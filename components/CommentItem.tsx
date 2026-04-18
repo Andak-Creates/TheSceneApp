@@ -30,6 +30,10 @@ interface CommentItemProps {
   isExpanded?: boolean;
   currentUserId?: string;
   partyHostId?: string;
+  partyHostProfile?: {
+    name: string;
+    avatar_url: string | null;
+  } | null;
 }
 
 export default function CommentItem({
@@ -39,6 +43,7 @@ export default function CommentItem({
   isExpanded = false,
   currentUserId,
   partyHostId,
+  partyHostProfile,
 }: CommentItemProps) {
   const router = useRouter();
   const { user } = useAuthStore();
@@ -107,12 +112,18 @@ export default function CommentItem({
         });
 
         if (comment.user.id !== user.id) {
-  const { data: likerProfile } = await supabase
-    .from("profiles")
-    .select("username")
-    .eq("id", user.id)
-    .single();
-  const likerName = likerProfile?.username || "Someone";
+          let likerName = "Someone";
+
+          if (partyHostId && user.id === partyHostId && partyHostProfile) {
+            likerName = partyHostProfile.name;
+          } else {
+            const { data: likerProfile } = await supabase
+              .from("profiles")
+              .select("username")
+              .eq("id", user.id)
+              .single();
+            likerName = likerProfile?.username || "Someone";
+          }
           await supabase.from("notifications").insert({
             user_id: comment.user.id,
             title: "💜 Comment liked",

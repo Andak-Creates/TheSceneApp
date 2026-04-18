@@ -203,7 +203,7 @@ export default function SettingsScreen() {
             <SettingItem
               icon="person-outline"
               label="Edit Profile"
-              onPress={() => router.back()}
+              onPress={() => router.push("/(app)/profile")}
             />
             <SettingItem
               icon="notifications-outline"
@@ -284,6 +284,20 @@ export default function SettingsScreen() {
               icon="location-outline"
               label="Location & Preferences"
               onPress={() => router.push("/(app)/settings/preferences")}
+            />
+          </View>
+        </View>
+
+        {/* Privacy */}
+        <View className="mb-8">
+          <Text className="text-gray-500 text-xs font-bold uppercase tracking-widest mb-2 ml-1">
+            Privacy
+          </Text>
+          <View className="bg-[#150d1e] rounded-3xl px-4 border border-white/5">
+            <SettingItem
+              icon="shield-outline"
+              label="Blocked Users"
+              onPress={() => router.push("/(app)/settings/blocked-users" as any)}
             />
           </View>
         </View>

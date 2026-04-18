@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -28,6 +28,8 @@ type VerificationStatus =
 export default function HostVerificationScreen() {
   const { user } = useAuthStore();
   const { profile } = useUserStore();
+  const { from } = useLocalSearchParams<{ from?: string }>();
+  const fromCreateParty = from === "createParty";
 
   const [status, setStatus] = useState<VerificationStatus>("idle");
   const [loading, setLoading] = useState(true);
@@ -223,12 +225,22 @@ export default function HostVerificationScreen() {
       className="flex-1 bg-[#09030e]"
     >
       <View className="pt-16 px-6 pb-6 border-b border-white/5">
-        <TouchableOpacity
-          onPress={() => router.back()}
-          className="w-10 h-10 mb-4"
-        >
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-        </TouchableOpacity>
+        <View className="flex-row items-center justify-between">
+          <TouchableOpacity
+            onPress={() => router.back()}
+            className="w-10 h-10 mb-4"
+          >
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          {fromCreateParty && (
+            <TouchableOpacity
+              onPress={() => router.replace("/(app)/createParty")}
+              className="mb-4 px-4 py-2 rounded-full bg-white/5 border border-white/10"
+            >
+              <Text className="text-gray-400 text-sm font-semibold">Skip for now</Text>
+            </TouchableOpacity>
+          )}
+        </View>
         <Text className="text-white text-2xl font-bold">Host Verification</Text>
         <Text className="text-gray-400 text-sm mt-1">
           Verify your identity to create and host parties on the platform.
@@ -375,7 +387,7 @@ export default function HostVerificationScreen() {
             <TouchableOpacity
               onPress={handleSubmit}
               disabled={submitting}
-              className="bg-purple-600 py-4 rounded-2xl items-center mb-8"
+              className="bg-purple-600 py-4 rounded-2xl items-center mb-4"
             >
               {submitting ? (
                 <ActivityIndicator color="#fff" />
@@ -385,6 +397,14 @@ export default function HostVerificationScreen() {
                 </Text>
               )}
             </TouchableOpacity>
+            {fromCreateParty && (
+              <TouchableOpacity
+                onPress={() => router.replace("/(app)/createParty")}
+                className="py-3 items-center mb-6"
+              >
+                <Text className="text-gray-500 text-sm">I'll do this later</Text>
+              </TouchableOpacity>
+            )}
           </>
         )}
       </ScrollView>

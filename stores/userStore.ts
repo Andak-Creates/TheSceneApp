@@ -8,6 +8,7 @@ interface Profile {
   avatar_url: string | null;
   bio: string | null;
   is_host: boolean;
+  referral_code?: string;
   created_at: string;
 }
 

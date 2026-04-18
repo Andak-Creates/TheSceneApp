@@ -72,53 +72,80 @@ Deno.serve(async (req) => {
       });
     }
 
-    const title = `🎊 New party near you!`;
-    const body = `${party.title} just dropped in ${party.city || party.state}`;
+    // ── Insert in-app notifications and build push array ───────────────
+    const notificationsToInsert = [];
+    const pushMessages = [];
 
-    // ── Insert in-app notifications ───────────────────────────────────────
-    await supabase.from("notifications").insert(
-      userIds.map((user_id) => ({
-        user_id,
-        title,
-        body,
-        type: "new_party",
-        data: { party_id: party.id },
-        is_read: false,
-      })),
-    );
-
-    // ── Get push tokens ───────────────────────────────────────────────────
+    // Get push tokens map for fast lookup
     const { data: tokenRows } = await supabase
       .from("push_tokens")
-      .select("token")
+      .select("user_id, token")
       .in("user_id", userIds);
 
-    const tokens = (tokenRows || []).map((r) => r.token).filter(Boolean);
+    const userTokenMap: Record<string, string[]> = {};
+    if (tokenRows) {
+      tokenRows.forEach(row => {
+        if (!userTokenMap[row.user_id]) userTokenMap[row.user_id] = [];
+        if (row.token) userTokenMap[row.user_id].push(row.token);
+      });
+    }
 
-    // ── Send in batches ───────────────────────────────────────────────────
+    const partyStateSafe = party.state?.toLowerCase().trim();
+
+    for (const pref of interestedUsers) {
+       const user_id = pref.user_id;
+       const userStateSafe = pref.state?.toLowerCase().trim();
+
+       // Dynamic Title matching condition
+       const isNearUser = partyStateSafe && userStateSafe && partyStateSafe === userStateSafe;
+       const dynamicTitle = isNearUser ? `🎊 New party near you!` : `🎊 New party on TheScene!`;
+       const body = `${party.title} just dropped in ${party.city || party.state}`;
+
+       // 1. Prepare in-app notification DB insert
+       notificationsToInsert.push({
+          user_id,
+          title: dynamicTitle,
+          body,
+          type: "new_party",
+          data: { party_id: party.id },
+          is_read: false,
+       });
+
+       // 2. Prepare push messages for Expo if User has tokens
+       const tokensForUser = userTokenMap[user_id] || [];
+       for (const token of tokensForUser) {
+           pushMessages.push({
+             to: token,
+             title: dynamicTitle,
+             body,
+             data: { party_id: party.id, type: "new_party" },
+             sound: "default",
+             priority: "high",
+           });
+       }
+    }
+
+    // Insert all DB notifications
+    if (notificationsToInsert.length > 0) {
+      await supabase.from("notifications").insert(notificationsToInsert);
+    }
+
+    // ── Send Push Notifications in batches ────────────────────────────────
     let totalSent = 0;
-    for (let i = 0; i < tokens.length; i += 100) {
-      const batch = tokens.slice(i, i + 100);
-      const messages = batch.map((token) => ({
-        to: token,
-        title,
-        body,
-        data: { party_id: party.id, type: "new_party" },
-        sound: "default",
-        priority: "high",
-      }));
+    for (let i = 0; i < pushMessages.length; i += 100) {
+      const batch = pushMessages.slice(i, i + 100);
 
       const res = await fetch(EXPO_PUSH_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(messages),
+        body: JSON.stringify(batch),
       });
 
       if (res.ok) totalSent += batch.length;
     }
 
     return new Response(
-      JSON.stringify({ sent: totalSent, in_app: userIds.length }),
+      JSON.stringify({ sent: totalSent, in_app: notificationsToInsert.length }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err) {

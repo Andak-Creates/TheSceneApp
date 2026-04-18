@@ -90,6 +90,22 @@ export default function AppLayout() {
       />
 
       <Tabs.Screen
+        name="settings/blocked-users"
+        options={{
+          href: null,
+          tabBarStyle: { display: "none" },
+        }}
+      />
+
+      <Tabs.Screen
+        name="settings/blocked-brands"
+        options={{
+          href: null,
+          tabBarStyle: { display: "none" },
+        }}
+      />
+
+      <Tabs.Screen
         name="host-verification"
         options={{
           href: null,

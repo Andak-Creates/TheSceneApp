@@ -4,6 +4,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
@@ -62,10 +63,10 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Fetch the party to get host_id
+    // Fetch the party + tier details (needed for email and earnings)
     const { data: party, error: partyError } = await supabase
       .from("parties")
-      .select("id, host_id, currency_code")
+      .select("id, host_id, currency_code, title, date, location, city")
       .eq("id", partyId)
       .single();
 
@@ -75,6 +76,12 @@ Deno.serve(async (req) => {
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
+
+    const { data: tier } = await supabase
+      .from("ticket_tiers")
+      .select("name")
+      .eq("id", tierId)
+      .single();
 
     // Insert ticket (service role bypasses RLS)
     const { data: ticket, error: ticketError } = await supabase
@@ -120,6 +127,37 @@ Deno.serve(async (req) => {
     if (earningsError) {
       console.error("Earnings log error:", earningsError);
       // Non-fatal — ticket is created
+    }
+
+    // Send confirmation email to the guest (fire-and-forget — non-fatal)
+    try {
+      const emailRes = await fetch(`${SUPABASE_URL}/functions/v1/send-ticket-email`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${SUPABASE_SERVICE_KEY}`,
+        },
+        body: JSON.stringify({
+          ticketId: ticket.id,
+          partyId: partyId,
+          guestEmail: guestEmail.toLowerCase().trim(),
+          guestName: guestName.trim(),
+          partyTitle: party.title,
+          partyDate: party.date ?? null,
+          partyLocation: party.location ?? null,
+          partyCity: party.city ?? null,
+          tierName: tier?.name ?? "General Admission",
+          quantity: quantity ?? 1,
+          totalPaid: totalPaid,
+          currency: currency || party.currency_code || "NGN",
+        }),
+      });
+      if (!emailRes.ok) {
+        const emailErr = await emailRes.text();
+        console.error("send-ticket-email failed:", emailErr);
+      }
+    } catch (emailErr) {
+      console.error("Could not send ticket email:", emailErr);
     }
 
     return new Response(

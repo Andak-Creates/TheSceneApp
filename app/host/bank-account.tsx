@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -263,62 +264,109 @@ export default function BankAccountScreen() {
           )}
         </TouchableOpacity>
       </ScrollView>
-
+ 
       {/* Bank Picker Modal */}
       <Modal
         visible={showBankPicker}
-        animationType="slide"
+        animationType="fade"
         transparent
         onRequestClose={() => setShowBankPicker(false)}
       >
-        <View className="flex-1 bg-black/60 justify-end">
-          <View className="bg-[#1e1330] rounded-t-3xl max-h-[80%]">
-            {/* Modal Header */}
-            <View className="px-6 pt-5 pb-3 flex-row justify-between items-center border-b border-white/10">
-              <Text className="text-white text-lg font-bold">Select Bank</Text>
-              <TouchableOpacity onPress={() => setShowBankPicker(false)}>
-                <Ionicons name="close" size={24} color="#fff" />
-              </TouchableOpacity>
-            </View>
-
-            {/* Search */}
-            <View className="px-6 py-3">
-              <View className="bg-white/10 border border-white/10 rounded-xl flex-row items-center px-4">
-                <Ionicons name="search" size={18} color="#666" />
-                <TextInput
-                  className="flex-1 text-white text-sm py-3 ml-2"
-                  placeholder="Search banks..."
-                  placeholderTextColor="#666"
-                  value={bankSearch}
-                  onChangeText={setBankSearch}
-                  autoFocus
-                />
-              </View>
-            </View>
-
-            {/* Bank List */}
-            <ScrollView keyboardShouldPersistTaps="handled">
-              {filteredBanks.map((bank) => (
+        <TouchableOpacity
+          className="flex-1 bg-black/80 items-center justify-center px-6"
+          activeOpacity={1}
+          onPress={() => {
+            Keyboard.dismiss();
+            setShowBankPicker(false);
+          }}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            className="w-full max-w-[400px]"
+          >
+            <TouchableOpacity
+              activeOpacity={1}
+              className="bg-[#1e1330] rounded-[32px] overflow-hidden border border-white/10 w-full"
+              style={{ height: 500 }}
+            >
+              {/* Modal Header */}
+              <View className="px-6 pt-5 pb-3 flex-row justify-between items-center border-b border-white/10">
+                <Text className="text-white text-lg font-bold">Select Bank</Text>
                 <TouchableOpacity
-                  key={bank.code}
-                  onPress={() => {
-                    setSelectedBank(bank);
-                    setBankSearch("");
-                    setShowBankPicker(false);
-                  }}
-                  className={`px-6 py-4 border-b border-white/5 flex-row justify-between items-center ${
-                    selectedBank?.code === bank.code ? "bg-purple-600/20" : ""
-                  }`}
+                  onPress={() => setShowBankPicker(false)}
+                  className="p-2 -mr-2"
                 >
-                  <Text className="text-white font-medium">{bank.name}</Text>
-                  {selectedBank?.code === bank.code && (
-                    <Ionicons name="checkmark-circle" size={20} color="#a855f7" />
-                  )}
+                  <Ionicons name="close" size={24} color="#fff" />
                 </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
+              </View>
+
+              {/* Search */}
+              <View className="px-6 py-4">
+                <View className="bg-white/5 border border-white/10 rounded-2xl flex-row items-center px-4 h-14">
+                  <Ionicons name="search" size={20} color="#666" />
+                  <TextInput
+                    className="flex-1 text-white text-base ml-3"
+                    placeholder="Search banks..."
+                    placeholderTextColor="#666"
+                    value={bankSearch}
+                    onChangeText={setBankSearch}
+                    autoFocus
+                    returnKeyType="search"
+                  />
+                  {bankSearch.length > 0 && (
+                    <TouchableOpacity onPress={() => setBankSearch("")}>
+                      <Ionicons name="close-circle" size={20} color="#666" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+
+              {/* Bank List */}
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ paddingBottom: 20 }}
+                showsVerticalScrollIndicator={false}
+              >
+                {filteredBanks.map((bank) => (
+                  <TouchableOpacity
+                    key={bank.code}
+                    onPress={() => {
+                      setSelectedBank(bank);
+                      setBankSearch("");
+                      setShowBankPicker(false);
+                    }}
+                    className={`px-6 py-4 border-b border-white/5 flex-row justify-between items-center ${
+                      selectedBank?.code === bank.code ? "bg-purple-600/10" : ""
+                    }`}
+                  >
+                    <View className="flex-1">
+                      <Text
+                        className={`text-base ${
+                          selectedBank?.code === bank.code
+                            ? "text-purple-400 font-bold"
+                            : "text-white"
+                        }`}
+                      >
+                        {bank.name}
+                      </Text>
+                    </View>
+                    {selectedBank?.code === bank.code && (
+                      <Ionicons name="checkmark-circle" size={22} color="#a855f7" />
+                    )}
+                  </TouchableOpacity>
+                ))}
+                {filteredBanks.length === 0 && (
+                  <View className="items-center py-10 px-6">
+                    <Ionicons name="search-outline" size={48} color="#333" />
+                    <Text className="text-gray-500 text-center mt-4">
+                      No banks matching "{bankSearch}"
+                    </Text>
+                  </View>
+                )}
+              </ScrollView>
+            </TouchableOpacity>
+          </KeyboardAvoidingView>
+        </TouchableOpacity>
       </Modal>
     </KeyboardAvoidingView>
   );

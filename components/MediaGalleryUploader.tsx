@@ -24,6 +24,7 @@ interface MediaItem {
 
 interface MediaGalleryUploaderProps {
   partyId?: string; // Optional during creation
+  initialMedia?: MediaItem[];
   onMediaChange: (media: MediaItem[]) => void;
   maxImages?: number;
   maxVideos?: number;
@@ -31,11 +32,12 @@ interface MediaGalleryUploaderProps {
 
 export default function MediaGalleryUploader({
   partyId,
+  initialMedia = [],
   onMediaChange,
   maxImages = 10,
   maxVideos = 3,
 }: MediaGalleryUploaderProps) {
-  const [media, setMedia] = useState<MediaItem[]>([]);
+  const [media, setMedia] = useState<MediaItem[]>(initialMedia);
 
   const handleAddImages = async () => {
     try {

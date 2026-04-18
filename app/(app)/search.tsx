@@ -126,17 +126,20 @@ export default function SearchScreen() {
           }
           
           if (user && combined.length > 0) {
-            const ownerIds = combined.map(p => p.owner_id);
-            const { data: followsData } = await supabase
-              .from("follows")
-              .select("following_id")
-              .eq("follower_id", user.id)
-              .in("following_id", ownerIds);
+            const userOwnerIds = combined.filter(p => p.type === 'user').map(p => p.owner_id);
+            const hostIds = combined.filter(p => p.type === 'host').map(p => p.id);
+            
+            const [usersData, hostsData] = await Promise.all([
+               userOwnerIds.length > 0 ? supabase.from("follows").select("following_id").eq("follower_id", user.id).in("following_id", userOwnerIds) : { data: [] },
+               hostIds.length > 0 ? supabase.from("host_follows").select("host_profile_id").eq("follower_id", user.id).in("host_profile_id", hostIds) : { data: [] }
+            ]);
               
-            const followSet = new Set(followsData?.map(f => f.following_id) || []);
+            const followUsersSet = new Set(usersData.data?.map((f: any) => f.following_id) || []);
+            const followHostsSet = new Set(hostsData.data?.map((f: any) => f.host_profile_id) || []);
+
             combined = combined.map(p => ({
                ...p,
-               initialIsFollowing: followSet.has(p.owner_id)
+               initialIsFollowing: p.type === 'host' ? followHostsSet.has(p.id) : followUsersSet.has(p.owner_id)
             }));
           }
           

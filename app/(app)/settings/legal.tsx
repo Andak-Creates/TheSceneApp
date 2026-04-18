@@ -18,7 +18,7 @@ export default function LegalScreen() {
     <View className="flex-1 bg-[#191022]">
       {/* Header */}
       <View className="pt-14 px-6 pb-6 border-b border-white/10 flex-row items-center">
-        <TouchableOpacity onPress={() => router.back()} className="mr-4 p-2 bg-white/5 rounded-full">
+        <TouchableOpacity onPress={() => router.push("/(app)/settings")} className="mr-4 p-2 bg-white/5 rounded-full">
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
         <View>

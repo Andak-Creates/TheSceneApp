@@ -13,7 +13,8 @@ interface AuthState {
   signUp: (
     email: string,
     password: string,
-    username: string
+    username: string,
+    referredBy?: string
   ) => Promise<{ error: any }>;
   signIn: (email: string, password: string) => Promise<{ error: any }>;
   signOut: () => Promise<{ error: any }>;
@@ -53,16 +54,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  signUp: async (email: string, password: string, username: string) => {
+  signUp: async (email: string, password: string, username: string, referredBy?: string) => {
     try {
       // Sign up user with metadata
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
+          emailRedirectTo: "https://thesceneapp.online/email-confirmed",
           data: {
             username: username.toLowerCase(),
             full_name: username,
+            referred_by: referredBy || null,
           },
         },
       });

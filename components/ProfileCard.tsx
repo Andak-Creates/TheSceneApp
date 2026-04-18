@@ -45,16 +45,31 @@ export default function ProfileCard({ profile }: ProfileCardProps) {
 
     try {
       if (wasFollowing) {
-        await supabase
-          .from("follows")
-          .delete()
-          .eq("follower_id", user.id)
-          .eq("following_id", profile.owner_id);
+        if (profile.type === "host") {
+          await supabase
+            .from("host_follows")
+            .delete()
+            .eq("follower_id", user.id)
+            .eq("host_profile_id", profile.id);
+        } else {
+          await supabase
+            .from("follows")
+            .delete()
+            .eq("follower_id", user.id)
+            .eq("following_id", profile.owner_id);
+        }
       } else {
-        await supabase.from("follows").insert({
-          follower_id: user.id,
-          following_id: profile.owner_id,
-        });
+        if (profile.type === "host") {
+          await supabase.from("host_follows").insert({
+            follower_id: user.id,
+            host_profile_id: profile.id,
+          });
+        } else {
+          await supabase.from("follows").insert({
+            follower_id: user.id,
+            following_id: profile.owner_id,
+          });
+        }
 
         // Get own profile for notification text
         const { data: followerProfile } = await supabase

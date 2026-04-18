@@ -18,6 +18,7 @@ import MediaGalleryViewer from "../../components/MediaGalleryViewer";
 import { useUnreadNotifications } from "../../hooks/useUnreadNotifications";
 import { getCurrencySymbol } from "../../lib/currency";
 import { supabase } from "../../lib/supabase";
+import { shareParty } from "../../lib/share";
 import { useAuthStore } from "../../stores/authStore";
 
 const PartyCard = React.memo(({ 
@@ -81,6 +82,10 @@ const PartyCard = React.memo(({
     }
   };
 
+  const handleShare = async () => {
+    await shareParty(party.id, party.title);
+  };
+
   const formatDate = (dateString: string | null) => {
     if (!dateString) return "Date TBA";
     return new Date(dateString).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
@@ -114,14 +119,22 @@ const PartyCard = React.memo(({
 
   const handleBlockHost = async () => {
     if (!user) return;
-    Alert.alert("Block User", `Block ${party.host_profile?.name || "this host"}?`, [
+    const brandName = party.host_profile?.name || "this brand";
+    Alert.alert("Block Brand", `Block "${brandName}"? You won't see their events anymore.`, [
       { text: "Cancel", style: "cancel" },
       { text: "Block", style: "destructive", onPress: async () => {
           try {
-            const { error } = await supabase.from("blocked_users").insert({ blocker_id: user.id, blocked_id: party.host_id });
+            if (!party.host_profile?.id) {
+              Alert.alert("Error", "Could not identify the brand to block.");
+              return;
+            }
+            const { error } = await supabase.from("blocked_host_profiles").insert({
+              blocker_id: user.id,
+              blocked_host_profile_id: party.host_profile.id,
+            });
             if (error) throw error;
-            Alert.alert("User Blocked");
-            // Would normally filter out from feed, handled broadly
+            Alert.alert("Brand Blocked", `"${brandName}" has been blocked.`);
+            // Would normally filter out from feed, handled by RLS
           } catch (e: any) {
              Alert.alert(e.code === '23505' ? "Info" : "Error", e.code === '23505' ? "Already blocked" : "Could not block");
           }
@@ -137,7 +150,7 @@ const PartyCard = React.memo(({
     }
     Alert.alert("Party Options", "Please choose an action", [
       { text: "Report Party", style: "destructive", onPress: handleReportParty },
-      { text: "Block Host", style: "destructive", onPress: handleBlockHost },
+      { text: "Block Brand", style: "destructive", onPress: handleBlockHost },
       { text: "Cancel", style: "cancel" }
     ]);
   };
@@ -216,6 +229,9 @@ const PartyCard = React.memo(({
         <TouchableOpacity className="flex-row items-center mr-4" onPress={handleRepost}>
           <Ionicons name={party.is_reposted ? "repeat" : "repeat-outline"} size={26} color={party.is_reposted ? "#a855f7" : "#a3a3a3"} />
           <Text className="text-gray-300 ml-1.5 font-medium text-base">{party.reposts_count || 0}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity className="flex-row items-center ml-auto" onPress={handleShare}>
+          <Ionicons name="share-social-outline" size={24} color="#a3a3a3" />
         </TouchableOpacity>
       </View>
 
@@ -333,7 +349,7 @@ export default function FeedScreen() {
           <Text className="text-gray-400 text-sm mt-1">Find your next experience</Text>
         </View>
         <View className="flex-row items-center gap-3">
-          <TouchableOpacity onPress={() => router.push("/settings/notifications")} className="bg-white/5 p-3 rounded-full border border-white/10 relative">
+          <TouchableOpacity onPress={() => router.push({ pathname: "/settings/notifications", params: { from: "feed" } } as any)} className="bg-white/5 p-3 rounded-full border border-white/10 relative">
             <Ionicons name="notifications-outline" size={22} color="#a855f7" />
             {unreadCount > 0 && (
               <View className="absolute -top-1 -right-1 bg-red-500 rounded-full min-w-[18px] h-[18px] items-center justify-center border-2 border-[#09030e] px-1">

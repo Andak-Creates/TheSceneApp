@@ -1,6 +1,6 @@
 // app/(app)/notifications.tsx
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -40,6 +40,7 @@ const TYPE_ICON: Record<string, { name: any; color: string }> = {
 export default function NotificationsScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
+  const { from } = useLocalSearchParams<{ from?: string }>();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -263,7 +264,7 @@ export default function NotificationsScreen() {
       {/* Header */}
       <View className="pt-14 pb-4 px-6 flex-row items-center justify-between border-b border-white/5">
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={() => from === "feed" ? router.push("/(app)/feed") : router.push("/(app)/settings")}
           className="w-10 h-10 rounded-full bg-white/5 items-center justify-center"
         >
           <Ionicons name="arrow-back" size={22} color="#fff" />

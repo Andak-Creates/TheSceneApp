@@ -6,11 +6,10 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Image,
   ScrollView,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
 import PartyCard from "../../components/PartyCard";
 import { supabase } from "../../lib/supabase";
@@ -146,9 +145,9 @@ export default function HostProfileScreen() {
           : 0;
 
       const { count: followers } = await supabase
-        .from("follows")
+        .from("host_follows")
         .select("*", { count: "exact", head: true })
-        .eq("following_id", ownerId);
+        .eq("host_profile_id", hostProfileId);
 
       const { count: following } = await supabase
         .from("follows")
@@ -219,10 +218,10 @@ export default function HostProfileScreen() {
     if (!user) return;
     try {
       const { data } = await supabase
-        .from("follows")
+        .from("host_follows")
         .select("id")
         .eq("follower_id", user.id)
-        .eq("following_id", ownerId)
+        .eq("host_profile_id", hostProfileId)
         .single();
       setIsFollowing(!!data);
     } catch {
@@ -243,14 +242,14 @@ export default function HostProfileScreen() {
     try {
       if (wasFollowing) {
         await supabase
-          .from("follows")
+          .from("host_follows")
           .delete()
           .eq("follower_id", user.id)
-          .eq("following_id", profile.owner_id);
+          .eq("host_profile_id", hostProfileId);
       } else {
-        await supabase.from("follows").insert({
+        await supabase.from("host_follows").insert({
           follower_id: user.id,
-          following_id: profile.owner_id,
+          host_profile_id: hostProfileId,
         });
 
         const { data: followerProfile } = await supabase
@@ -380,11 +379,11 @@ export default function HostProfileScreen() {
         {/* Profile Info */}
         <View className="items-center mb-6">
           {profile.avatar_url ? (
-            <Image
-              source={{ uri: profile.avatar_url }}
-              style={{ width: 96, height: 96, borderRadius: 48, marginBottom: 16 }}
-              resizeMode="cover"
-            />
+            <ExpoImage
+  source={{ uri: profile.avatar_url }}
+  style={{ width: 96, height: 96, borderRadius: 48, marginBottom: 16 }}
+  contentFit="cover"
+/>
           ) : (
             <View className="w-24 h-24 rounded-full bg-purple-600 items-center justify-center mb-4">
               <Text className="text-white text-3xl font-bold">
@@ -439,16 +438,18 @@ export default function HostProfileScreen() {
 
         {/* Host Stats */}
         <View className="flex-row bg-white/5 rounded-2xl p-4 mb-4">
-          <View className="flex-1 items-center border-r border-white/10">
+          <View className={`flex-1 items-center ${isOwner ? "border-r" : "border-r"} border-white/10`}>
             <Text className="text-white text-2xl font-bold">{stats.partiesHosted}</Text>
             <Text className="text-gray-400 text-xs mt-1">Hosted</Text>
           </View>
-          <View className="flex-1 items-center border-r border-white/10">
-            <Text className="text-white text-2xl font-bold">{stats.totalTicketsSold}</Text>
-            <Text className="text-gray-400 text-xs mt-1">Tickets Sold</Text>
-          </View>
+          {isOwner && (
+            <View className="flex-1 items-center border-r border-white/10">
+              <Text className="text-white text-2xl font-bold">{stats.totalTicketsSold}</Text>
+              <Text className="text-gray-400 text-xs mt-1">Tickets Sold</Text>
+            </View>
+          )}
           <View className="flex-1 items-center">
-            <View className="flex-row items-center gap-1">
+            <View className="flex-row items-center gap-1 justify-center">
               <Text className="text-white text-2xl font-bold">
                 {stats.averageRating.toFixed(1)}
               </Text>

@@ -17,6 +17,7 @@ import {
   View,
 } from "react-native";
 import { useAuthStore } from "../../stores/authStore";
+import { supabase } from "../../lib/supabase";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -27,8 +28,10 @@ export default function SignUpScreen() {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [referralCode, setReferralCode] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [eulaAccepted, setEulaAccepted] = useState(false);
+  const [isSignedUp, setIsSignedUp] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -62,19 +65,39 @@ export default function SignUpScreen() {
     setLoading(true);
     setError("");
 
-    const { error: signUpError } = await signUp(email.trim(), password, username.trim());
+    let validReferral = undefined;
+    if (referralCode.trim()) {
+       const { data: refUser } = await supabase
+         .from("profiles")
+         .select("id")
+         .ilike("referral_code", referralCode.trim())
+         .single();
+         
+       if (!refUser) {
+          setError("Invalid referral code. Please check and try again.");
+          setLoading(false);
+          return;
+       }
+       validReferral = referralCode.trim().toUpperCase();
+    }
+
+    const { error: signUpError } = await signUp(email.trim(), password, username.trim(), validReferral);
 
     setLoading(false);
 
     if (signUpError) {
       setError(signUpError.message || "Failed to sign up");
     } else {
-      // Navigate to onboarding — root layout's auth guard will also
-      // redirect here, but we push explicitly for immediate UX
-      router.replace("/(auth)/onboarding");
-      setUsername("");
-      setPassword("");
-      setEmail("");
+      Alert.alert(
+        "Check Your Inbox!",
+        `Before you can set your vibe, you need to verify your email. A secure link has been sent to ${email}.`,
+        [
+          {
+            text: "Proceed to Login",
+            onPress: () => router.replace("/(auth)/login"),
+          },
+        ]
+      );
     }
   };
 
@@ -199,6 +222,20 @@ export default function SignUpScreen() {
                   </TouchableOpacity>
                 </View>
               </View>
+
+              {/* Referral Code Input */}
+              <View>
+                <Text className="text-gray-400 text-sm font-medium mb-2 ml-1">Referral Code (Optional)</Text>
+                <TextInput
+                  className="bg-white/10 flex-row border border-white/20 rounded-xl h-14 px-5 text-white text-base"
+                  placeholder="Referral Code?"
+                  placeholderTextColor="#888"
+                  value={referralCode}
+                  onChangeText={setReferralCode}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                />
+              </View>
             </View>
                         {/* EULA */}
             <TouchableOpacity 
@@ -213,14 +250,14 @@ export default function SignUpScreen() {
                 I agree to the{" "}
                 <Text
                   className="text-gray-300 underline font-medium"
-                  onPress={() => Linking.openURL("https://thescene.vercel.app/terms-of-service")}
+                  onPress={() => Linking.openURL("https://thesceneapp.online/terms-of-service")}
                 >
                   Terms of Service
                 </Text>{" "}
                 and{" "}
                 <Text
                   className="text-gray-300 underline font-medium"
-                  onPress={() => Linking.openURL("https://thescene.vercel.app/privacy-policy")}
+                  onPress={() => Linking.openURL("https://thesceneapp.online/privacy-policy")}
                 >
                   Privacy Policy
                 </Text>
@@ -256,8 +293,6 @@ export default function SignUpScreen() {
                 </Text>
               </Text>
             </View>
-
-
 
           </View>
         </ScrollView>

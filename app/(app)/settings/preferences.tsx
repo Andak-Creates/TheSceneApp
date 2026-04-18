@@ -143,7 +143,7 @@ export default function PreferencesScreen() {
       className="flex-1 bg-[#09030e]"
     >
       <View className="pt-16 pb-4 px-6 border-b border-white/5 flex-row items-center">
-        <TouchableOpacity onPress={() => router.back()} className="mr-4 p-2 bg-white/5 rounded-full">
+        <TouchableOpacity onPress={() => router.push("/(app)/settings")} className="mr-4 p-2 bg-white/5 rounded-full">
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text className="text-white text-2xl font-bold">Location & Preferences</Text>

@@ -62,9 +62,9 @@ export default Sentry.wrap(function RootLayout() {
 
     if (!user && !inAuthGroup) {
       router.replace("/(auth)/welcome");
-    } else if (user && !hasPreferences && second !== "onboarding") {
+    } else if (user && !hasPreferences && second !== "onboarding" && second !== "reset-password") {
       router.replace("/(auth)/onboarding");
-    } else if (user && hasPreferences && inAuthGroup && second !== "onboarding") {
+    } else if (user && hasPreferences && inAuthGroup && second !== "onboarding" && second !== "reset-password") {
       router.replace("/(app)/feed");
     }
   }, [user, initialized, segments, hasPreferences]);

@@ -1,11 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import { VideoView, useVideoPlayer } from "expo-video";
 import React, { useRef, useState } from "react";
 import {
   Dimensions,
   FlatList,
   Modal,
-  Image as RNImage,
   ScrollView,
   Text,
   TouchableOpacity,
@@ -92,10 +92,10 @@ export default function MediaGalleryViewer({
       style={{ width: containerWidth, aspectRatio }}
     >
       {item.media_type === "image" ? (
-        <RNImage
+        <Image
           source={{ uri: item.media_url }}
-          className="w-full h-full bg-gray-900"
-          resizeMode="cover"
+          style={{ width: "100%", height: "100%", backgroundColor: "#111" }}
+          contentFit="cover"
         />
       ) : (
         <View className="flex-1">
@@ -128,10 +128,10 @@ export default function MediaGalleryViewer({
       }}
     >
       {item.media_type === "image" ? (
-        <RNImage
+        <Image
           source={{ uri: item.media_url }}
           style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT }}
-          resizeMode="contain"
+          contentFit="contain"
         />
       ) : (
         <View style={{ flex: 1 }}>
@@ -246,15 +246,15 @@ export default function MediaGalleryViewer({
                     <Ionicons name="videocam" size={20} color="#666" />
                   </View>
                 ) : (
-                  <RNImage
+                  <Image
                     source={{
                       uri:
                         item.media_type === "video"
                           ? item.thumbnail_url!
                           : item.media_url,
                     }}
-                    className="w-16 h-16 bg-gray-900"
-                    resizeMode="cover"
+                    style={{ width: 64, height: 64, backgroundColor: "#1a1a1a" }}
+                    contentFit="cover"
                   />
                 )}
                 {item.media_type === "video" && (
