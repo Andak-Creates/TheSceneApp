@@ -63,6 +63,36 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Securely verify payment with Paystack
+    if (totalPaid > 0) {
+      const PAYSTACK_SECRET_KEY = Deno.env.get("PAYSTACK_SECRET_KEY");
+      if (!PAYSTACK_SECRET_KEY) {
+        throw new Error("Server configuration error: Missing payment verification key.");
+      }
+
+      const verifyRes = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
+        headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` }
+      });
+      
+      const verifyData = await verifyRes.json();
+      
+      if (!verifyRes.ok || !verifyData.status || verifyData.data.status !== "success") {
+        return new Response(
+          JSON.stringify({ error: "Payment verification failed. The transaction was not successful." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      
+      // Paystack returns amount in kobo (or lowest denomination)
+      const expectedAmountInKobo = Math.round(totalPaid * 100);
+      if (verifyData.data.amount < expectedAmountInKobo) {
+        return new Response(
+          JSON.stringify({ error: "Payment amount mismatch. Did not pay the full amount." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
     // Fetch the party + tier details (needed for email and earnings)
     const { data: party, error: partyError } = await supabase
       .from("parties")

@@ -12,10 +12,13 @@ import {
     View
 } from "react-native";
 import { supabase } from "../lib/supabase";
+import { queryKeys } from "../lib/queryKeys";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "../stores/authStore";
 import { useUserStore } from "../stores/userStore";
 import HostProfileSelector from "../components/HostProfileSelector";
 import { Image } from "expo-image";
+import { notifyAdmins } from "../lib/adminNotifications";
 
 type Tab = "parties" | "scanner" | "analytics";
 type FilterType = "all" | "owned" | "admin";
@@ -92,24 +95,12 @@ export default function HostDashboardScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
   const { profile } = useUserStore();
+  const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState<Tab>("parties");
-  const [parties, setParties] = useState<PartyWithTiers[]>([]);
-  const [analytics, setAnalytics] = useState<Analytics>({
-    totalRevenue: 0,
-    totalTicketsSold: 0,
-    totalParties: 0,
-    averageRating: 0,
-    upcomingParties: 0,
-  });
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [balance, setBalance] = useState<HostBalance | null>(null);
-  const [logs, setLogs] = useState<EarningLog[]>([]);
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
-  const [isVerified, setIsVerified] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
   const scanLock = useRef(false);
   const [showProfileSelector, setShowProfileSelector] = useState(false);
@@ -119,183 +110,124 @@ export default function HostDashboardScreen() {
     string | null
   >(null);
   const [showPartyPicker, setShowPartyPicker] = useState(false);
-
-  // ✅ ADD FILTERING STATE
   const [filterType, setFilterType] = useState<FilterType>("all");
-  const [hasOwnedAndAdmin, setHasOwnedAndAdmin] = useState(false);
 
-  useEffect(() => {
-    fetchHostData();
-  }, []);
+  // ---------------------------------------------------------------------------
+  // Pure fetch function — returns all host data for useQuery
+  // ---------------------------------------------------------------------------
+  const fetchHostData = async (): Promise<{
+    parties: PartyWithTiers[];
+    balance: HostBalance;
+    logs: EarningLog[];
+    isVerified: boolean;
+    hasOwnedAndAdmin: boolean;
+  }> => {
+    if (!user) throw new Error("Not authenticated");
 
-  const fetchHostData = async () => {
-    if (!user) return;
+    const { data: ownedProfiles } = await supabase.from("host_profiles").select("id").eq("owner_id", user.id);
+    const { data: adminProfiles } = await supabase.from("host_admins").select("host_profile_id").eq("user_id", user.id);
 
-    try {
-      // 1. Fetch host profiles where user is owner or admin
-      const { data: ownedProfiles } = await supabase
-        .from("host_profiles")
-        .select("id")
-        .eq("owner_id", user.id);
+    const ownedIds = ownedProfiles?.map(p => p.id) || [];
+    const adminIds = adminProfiles?.map(p => p.host_profile_id) || [];
+    const profileIds = [...ownedIds, ...adminIds];
 
-      const { data: adminProfiles } = await supabase
-        .from("host_admins")
-        .select("host_profile_id")
-        .eq("user_id", user.id);
-
-      const ownedIds = ownedProfiles?.map(p => p.id) || [];
-      const adminIds = adminProfiles?.map(p => p.host_profile_id) || [];
-      
-      const profileIds = [...ownedIds, ...adminIds];
-
-      // If user has both their own profile AND is an admin for someone else, show the filter
-      setHasOwnedAndAdmin(ownedIds.length > 0 && adminIds.length > 0);
-
-      // fallback to legacy host_id if no profileIds found (for backward compatibility during migration)
-      let partiesData = [];
-      if (profileIds.length > 0) {
-        const { data, error } = await supabase
-          .from("parties")
-          .select("*, media:party_media(media_url, media_type, thumbnail_url, is_primary, display_order)")
-          .or(`host_profile_id.in.(${profileIds.join(',')}),host_id.eq.${user.id}`)
-          .order("date", { ascending: true });
-        if (error) throw error;
-        partiesData = data || [];
-      } else {
-        const { data, error } = await supabase
-          .from("parties")
-          .select("*, media:party_media(media_url, media_type, thumbnail_url, is_primary, display_order)")
-          .eq("host_id", user.id)
-          .order("date", { ascending: true });
-        if (error) throw error;
-        partiesData = data || [];
-      }
-
-      // ✅ FETCH TIER DATA FOR EACH PARTY
-      const partiesWithTiers = await Promise.all(
-        (partiesData || []).map(async (party) => {
-          const { data: tiers } = await supabase
-            .from("ticket_tiers")
-            .select("*")
-            .eq("party_id", party.id)
-            .eq("is_active", true);
-
-          const totalTickets =
-            tiers?.reduce((sum, t) => sum + t.quantity, 0) || 0;
-          const totalSold =
-            tiers?.reduce((sum, t) => sum + (t.quantity_sold || 0), 0) || 0;
-          const totalRevenue =
-            tiers?.reduce(
-              (sum, t) => sum + t.price * (t.quantity_sold || 0),
-              0,
-            ) || 0;
-
-          // Determine ownership type
-          let ownershipType: "owned" | "admin" = "owned";
-          if (party.host_profile_id) {
-            if (adminIds.includes(party.host_profile_id) && !ownedIds.includes(party.host_profile_id)) {
-              ownershipType = "admin";
-            }
-          } else if (party.host_id !== user.id) {
-            ownershipType = "admin";
-          }
-
-          return {
-            ...party,
-            total_tickets: totalTickets,
-            total_sold: totalSold,
-            total_revenue: totalRevenue,
-            ownershipType,
-          };
-        }),
-      );
-
-      setParties(partiesWithTiers);
-
-      // ✅ FETCH BALANCE + verification status in one query
-      const { data: balanceData } = await supabase
-        .from("host_balances")
-        .select("*")
-        .eq("user_id", user.id)
-        .single();
-
-      setBalance(balanceData || { total_earned: 0, total_withdrawn: 0, current_balance: 0, pending_payout: 0, currency: "NGN" });
-
-      // Fetch host verification status
-      if (user) {
-        const { data: profileRow } = await supabase
-          .from("profiles")
-          .select("host_verification_status, host_verified_at")
-          .eq("id", user.id)
-          .single();
-        if (profileRow) {
-          setIsVerified(
-            profileRow.host_verification_status === "approved" ||
-            !!profileRow.host_verified_at
-          );
-        }
-      }
-
-      // ✅ FETCH EARNINGS LOGS
-      const { data: logsData } = await supabase
-        .from("host_earnings_logs")
-        .select(`
-          *,
-          party:parties(title)
-        `)
-        .eq("host_id", user.id) // Personal earnings for managing parties
-        .order("created_at", { ascending: false })
-        .limit(10);
-      
-      setLogs(logsData || []);
-
-      // ✅ AUTO-SELECT FIRST UPCOMING PARTY FOR SCANNER
-      const upcomingParties = partiesWithTiers.filter(
-        (p) => p.date_tba || new Date(p.date) >= new Date(),
-      );
-      if (upcomingParties.length > 0 && !selectedPartyForScan) {
-        setSelectedPartyForScan(upcomingParties[0].id);
-      }
-    } catch (error) {
-      console.error("Error fetching host data:", error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+    let partiesData: any[] = [];
+    if (profileIds.length > 0) {
+      const { data, error } = await supabase
+        .from("parties")
+        .select("*, media:party_media(media_url, media_type, thumbnail_url, is_primary, display_order)")
+        .or(`host_profile_id.in.(${profileIds.join(",")}),host_id.eq.${user.id}`)
+        .order("date", { ascending: true });
+      if (error) throw error;
+      partiesData = data || [];
+    } else {
+      const { data, error } = await supabase
+        .from("parties")
+        .select("*, media:party_media(media_url, media_type, thumbnail_url, is_primary, display_order)")
+        .eq("host_id", user.id)
+        .order("date", { ascending: true });
+      if (error) throw error;
+      partiesData = data || [];
     }
+
+    const parties = await Promise.all(
+      partiesData.map(async (party) => {
+        const { data: tiers } = await supabase.from("ticket_tiers").select("*").eq("party_id", party.id).eq("is_active", true);
+        const totalTickets = tiers?.reduce((s, t) => s + t.quantity, 0) || 0;
+        const totalSold    = tiers?.reduce((s, t) => s + (t.quantity_sold || 0), 0) || 0;
+        const totalRevenue = tiers?.reduce((s, t) => s + t.price * (t.quantity_sold || 0), 0) || 0;
+        let ownershipType: "owned" | "admin" = "owned";
+        if (party.host_profile_id) {
+          if (adminIds.includes(party.host_profile_id) && !ownedIds.includes(party.host_profile_id)) ownershipType = "admin";
+        } else if (party.host_id !== user.id) {
+          ownershipType = "admin";
+        }
+        return { ...party, total_tickets: totalTickets, total_sold: totalSold, total_revenue: totalRevenue, ownershipType };
+      }),
+    );
+
+    const { data: balanceData } = await supabase.from("host_balances").select("*").eq("user_id", user.id).single();
+    const balance: HostBalance = balanceData || { total_earned: 0, total_withdrawn: 0, current_balance: 0, pending_payout: 0, currency: "NGN" };
+
+    const { data: profileRow } = await supabase.from("profiles").select("host_verification_status, host_verified_at").eq("id", user.id).single();
+    const isVerified = !!(profileRow?.host_verification_status === "approved" || profileRow?.host_verified_at);
+
+    const { data: logsData } = await supabase
+      .from("host_earnings_logs")
+      .select("*, party:parties(title)")
+      .eq("host_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(10);
+
+    return { parties, balance, logs: logsData || [], isVerified, hasOwnedAndAdmin: ownedIds.length > 0 && adminIds.length > 0 };
   };
 
-  // ✅ DYNAMICALLY CALCULATE ANALYTICS BASED ON FILTER
+  // ---------------------------------------------------------------------------
+  // useQuery — 2 minute staleTime, host data is not real-time critical
+  // ---------------------------------------------------------------------------
+  const { data: hostData, isLoading: loading, isRefetching: refreshing, refetch } = useQuery({
+    queryKey: queryKeys.hostDashboard(user?.id ?? ""),
+    queryFn: fetchHostData,
+    enabled: !!user,
+    staleTime: 2 * 60 * 1000,
+  });
+
+  const parties      = hostData?.parties      ?? [];
+  const balance      = hostData?.balance      ?? null;
+  const logs         = hostData?.logs         ?? [];
+  const isVerified   = hostData?.isVerified   ?? false;
+  const hasOwnedAndAdmin = hostData?.hasOwnedAndAdmin ?? false;
+
+  // Auto-select first upcoming party for scanner when data loads
+  useEffect(() => {
+    if (!selectedPartyForScan && parties.length > 0) {
+      const upcoming = parties.find(p => p.date_tba || new Date(p.date) >= new Date());
+      if (upcoming) setSelectedPartyForScan(upcoming.id);
+    }
+  }, [parties]);
+
+  // ---------------------------------------------------------------------------
+  // Analytics — derived from cached parties + filter (cheap local computation)
+  // ---------------------------------------------------------------------------
+  const [analytics, setAnalytics] = useState<Analytics>({
+    totalRevenue: 0, totalTicketsSold: 0, totalParties: 0, averageRating: 0, upcomingParties: 0,
+  });
+
   useEffect(() => {
     const computeAnalytics = async () => {
       const filteredParties = parties.filter(p => filterType === "all" || p.ownershipType === filterType);
-      
-      const totalRevenue = filteredParties.reduce((sum, p) => sum + p.total_revenue, 0);
-      const totalTicketsSold = filteredParties.reduce((sum, p) => sum + p.total_sold, 0);
+      const totalRevenue = filteredParties.reduce((s, p) => s + p.total_revenue, 0);
+      const totalTicketsSold = filteredParties.reduce((s, p) => s + p.total_sold, 0);
       const upcomingCount = filteredParties.filter(p => p.date_tba || new Date(p.date) >= new Date()).length;
-
       const partyIds = filteredParties.map(p => p.id);
       let avgRating = 0;
       if (partyIds.length > 0) {
-        const { data: reviews } = await supabase
-          .from("reviews")
-          .select("rating")
-          .in("party_id", partyIds);
-
-        avgRating = reviews && reviews.length ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length : 0;
+        const { data: reviews } = await supabase.from("reviews").select("rating").in("party_id", partyIds);
+        avgRating = reviews && reviews.length ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length : 0;
       }
-
-      setAnalytics({
-        totalRevenue,
-        totalTicketsSold,
-        totalParties: filteredParties.length,
-        averageRating: avgRating,
-        upcomingParties: upcomingCount,
-      });
+      setAnalytics({ totalRevenue, totalTicketsSold, totalParties: filteredParties.length, averageRating: avgRating, upcomingParties: upcomingCount });
     };
-
-    if (!loading) {
-      computeAnalytics();
-    }
+    if (!loading) computeAnalytics();
   }, [parties, filterType, loading]);
 
   const handleWithdraw = async () => {
@@ -345,8 +277,16 @@ export default function HostDashboardScreen() {
                   status: "pending",
                 });
               if (error) throw error;
+
+              // Notify Admins
+              notifyAdmins(
+                "💰 New Payout Request",
+                `Withdrawal request of ${formatCurrency(balance.current_balance, balance.currency)} from ${profile?.full_name || profile?.username}.`,
+                { type: "withdrawal", host_id: user.id }
+              );
+
               Alert.alert("Request Submitted ✓", "Your withdrawal request has been submitted. We'll process it within 1-2 business days.");
-              handleRefresh();
+              queryClient.invalidateQueries({ queryKey: queryKeys.hostDashboard(user.id) });
             } catch (err) {
               console.error("Withdrawal error:", err);
               Alert.alert("Error", "Failed to submit withdrawal request. Please try again.");
@@ -359,10 +299,7 @@ export default function HostDashboardScreen() {
     );
   };
 
-  const handleRefresh = () => {
-    setRefreshing(true);
-    fetchHostData();
-  };
+  const handleRefresh = () => { refetch(); };
 
   const handleBarCodeScanned = async ({ data }: { data: string }) => {
     if (scanLock.current) return;

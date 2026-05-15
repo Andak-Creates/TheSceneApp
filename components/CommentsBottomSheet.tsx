@@ -303,6 +303,27 @@ const handleSubmitComment = async () => {
     }
   };
 
+  // Defined BEFORE renderComment so the const is available when renderComment runs.
+  // (Unlike regular `function` declarations, `const` arrow functions are NOT hoisted.)
+  const handleDeleteComment = async (commentId: string) => {
+    try {
+      if (!user) return;
+
+      const { error } = await supabase
+        .from("party_comments")
+        .delete()
+        .eq("id", commentId)
+        .eq("user_id", user.id);
+
+      if (error) throw error;
+
+      // Instantly remove from UI without waiting for a re-fetch
+      setComments((prev) => prev.filter((c) => c.id !== commentId));
+    } catch (error) {
+      console.error("Delete comment error:", error);
+    }
+  };
+
   const renderComment = ({ item }: { item: Comment }) => {
     const isReply = item.parent_comment_id !== null;
     const hostProfile = hostProfileMap[item.user.id] || null;
@@ -314,6 +335,7 @@ const handleSubmitComment = async () => {
           onReply={(commentId, username) =>
             handleReply(commentId, username, item.user.id)
           }
+          onDelete={handleDeleteComment}
           onViewReplies={handleViewReplies}
           currentUserId={user?.id}
           partyHostId={partyHostId || undefined}

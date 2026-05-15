@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { supabase } from "../../lib/supabase";
+import { getFriendlyErrorMessage } from "../../lib/error-utils";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -38,12 +39,12 @@ export default function ForgotPasswordScreen() {
 
     try {
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: "thescene://reset-password",
+        redirectTo: "https://thesceneapp.online/reset-password",
       });
       if (resetError) throw resetError;
       setSent(true);
     } catch (err: any) {
-      setError(err.message || "Failed to send reset email. Please try again.");
+      setError(getFriendlyErrorMessage(err) || "Failed to send reset email. Please try again.");
     } finally {
       setLoading(false);
     }

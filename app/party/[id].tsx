@@ -2,17 +2,18 @@ import AttendancePill from "@/components/AttendancePill";
 import CommentsBottomSheet from "@/components/CommentsBottomSheet";
 import MediaGalleryViewer from "@/components/MediaGalleryViewer";
 import TBAToggle from "@/components/TBAToggle";
+import { shareParty } from "@/lib/share";
 import { useAudioStore } from "@/stores/audioStore";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { decode } from "base64-arraybuffer";
 import * as FileSystem from "expo-file-system/legacy";
+import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
-import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import * as VideoThumbnails from "expo-video-thumbnails";
-import { shareParty } from "@/lib/share";
-import { Image } from "expo-image";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -22,7 +23,6 @@ import {
   Modal,
   Platform,
   ScrollView,
-  Share,
   Text,
   TextInput,
   TouchableOpacity,
@@ -35,6 +35,7 @@ import Animated, {
   withSpring,
 } from "react-native-reanimated";
 import { getCurrencySymbol } from "../../lib/currency";
+import { queryKeys } from "../../lib/queryKeys";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "../../stores/authStore";
 
@@ -105,12 +106,13 @@ export default function PartyDetailScreen() {
   const viewRecorded = useRef(false);
   const { setActiveVideoId } = useAudioStore();
   const [isFocused, setIsFocused] = useState(true);
+  const queryClient = useQueryClient();
 
   useFocusEffect(
     useCallback(() => {
       setIsFocused(true);
       return () => setIsFocused(false);
-    }, [])
+    }, []),
   );
 
   useEffect(() => {
@@ -118,10 +120,7 @@ export default function PartyDetailScreen() {
     setActiveVideoId(null);
   }, []);
 
-  const [party, setParty] = useState<Party | null>(null);
-  const [loading, setLoading] = useState(true);
   const [isCommentsVisible, setIsCommentsVisible] = useState(false);
-  const currencySymbol = getCurrencySymbol(party?.currency_code || "NGN");
 
   // Floating button movement
   const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } =
@@ -173,12 +172,6 @@ export default function PartyDetailScreen() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
 
-  // Ticket States
-  const [ticketTiers, setTicketTiers] = useState<TicketTier[]>([]);
-  const [totalTickets, setTotalTickets] = useState(0);
-  const [totalSold, setTotalSold] = useState(0);
-  const [minPrice, setMinPrice] = useState(0);
-
   // Ticket Management States
   const [isManagingTickets, setIsManagingTickets] = useState(false);
   const [newTierName, setNewTierName] = useState("");
@@ -217,45 +210,155 @@ export default function PartyDetailScreen() {
     }
   };
 
-
   useEffect(() => {
-    if (partyId) {
-      fetchPartyDetails();
-      fetchTicketTiers();
-      recordPartyView();
-    }
+    if (partyId) recordPartyView();
   }, [partyId]);
 
-  // ✅ NEW FUNCTION TO FETCH TICKET TIERS
-  const fetchTicketTiers = async () => {
-    try {
-      const { data: tiersData, error } = await supabase
-        .from("ticket_tiers")
-        .select("*")
-        .eq("party_id", partyId)
-        .eq("is_active", true)
-        .order("tier_order", { ascending: true });
+  // ---------------------------------------------------------------------------
+  // Pure fetch functions — return data for useQuery
+  // ---------------------------------------------------------------------------
+  async function fetchPartyDetails(): Promise<Party> {
+    const { data: partyData, error: partyError } = await supabase
+      .from("parties")
+      .select(
+        `
+        *,
+        host:profiles!host_id (id, username, full_name, avatar_url, is_host),
+        host_profile:host_profiles!host_profile_id (id, name, avatar_url),
+        media:party_media(*)
+      `,
+      )
+      .eq("id", partyId)
+      .single();
+    if (partyError) throw partyError;
 
-      if (error) throw error;
-
-      if (tiersData && tiersData.length > 0) {
-        setTicketTiers(tiersData);
-
-        // Calculate totals from tiers
-        const total = tiersData.reduce((sum, tier) => sum + tier.quantity, 0);
-        const sold = tiersData.reduce(
-          (sum, tier) => sum + (tier.quantity_sold || 0),
-          0,
-        );
-        const lowest = Math.min(...tiersData.map((t) => t.price));
-
-        setTotalTickets(total);
-        setTotalSold(sold);
-        setMinPrice(lowest);
-      }
-    } catch (error) {
-      console.error("Error fetching ticket tiers:", error);
+    if (partyData.media && Array.isArray(partyData.media)) {
+      partyData.media = partyData.media.filter(
+        (m: any) =>
+          m.media_url &&
+          (m.media_url.startsWith("http") || m.media_url.startsWith("https")),
+      );
+      partyData.media.sort((a: any, b: any) => {
+        if (a.is_primary) return -1;
+        if (b.is_primary) return 1;
+        return (a.display_order || 0) - (b.display_order || 0);
+      });
     }
+
+    const [{ count: likesCount }, { count: commentsCount }] = await Promise.all(
+      [
+        supabase
+          .from("party_likes")
+          .select("*", { count: "exact", head: true })
+          .eq("party_id", partyId),
+        supabase
+          .from("party_comments")
+          .select("*", { count: "exact", head: true })
+          .eq("party_id", partyId),
+      ],
+    );
+
+    let isLiked = false,
+      isBookmarked = false,
+      hasTicket = false,
+      hasReviewed = false;
+    if (user) {
+      const [likeRes, bookmarkRes, ticketRes, reviewRes] = await Promise.all([
+        supabase
+          .from("party_likes")
+          .select("id")
+          .eq("party_id", partyId)
+          .eq("user_id", user.id)
+          .maybeSingle(),
+        supabase
+          .from("party_bookmarks")
+          .select("id")
+          .eq("party_id", partyId)
+          .eq("user_id", user.id)
+          .maybeSingle(),
+        supabase
+          .from("tickets")
+          .select("id")
+          .eq("party_id", partyId)
+          .eq("user_id", user.id)
+          .eq("payment_status", "completed")
+          .limit(1)
+          .maybeSingle(),
+        supabase
+          .from("reviews")
+          .select("id")
+          .eq("party_id", partyId)
+          .eq("reviewer_id", user.id)
+          .limit(1)
+          .maybeSingle(),
+      ]);
+      isLiked = !!likeRes.data;
+      isBookmarked = !!bookmarkRes.data;
+      hasTicket = !!ticketRes.data;
+      hasReviewed = !!reviewRes.data;
+    }
+
+    return {
+      ...partyData,
+      likes_count: likesCount || 0,
+      comments_count: commentsCount || 0,
+      is_liked: isLiked,
+      is_bookmarked: isBookmarked,
+      has_ticket: hasTicket,
+      has_reviewed: hasReviewed,
+    };
+  }
+
+  async function fetchTicketTiersData(): Promise<{
+    tiers: TicketTier[];
+    totalTickets: number;
+    totalSold: number;
+    minPrice: number;
+  }> {
+    const { data: tiersData, error } = await supabase
+      .from("ticket_tiers")
+      .select("*")
+      .eq("party_id", partyId)
+      .eq("is_active", true)
+      .order("tier_order", { ascending: true });
+    if (error) throw error;
+    const tiers = tiersData || [];
+    return {
+      tiers,
+      totalTickets: tiers.reduce((s, t) => s + t.quantity, 0),
+      totalSold: tiers.reduce((s, t) => s + (t.quantity_sold || 0), 0),
+      minPrice: tiers.length > 0 ? Math.min(...tiers.map((t) => t.price)) : 0,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // useQuery hooks
+  // ---------------------------------------------------------------------------
+  const partyQuery = useQuery({
+    queryKey: queryKeys.partyDetail(partyId),
+    queryFn: fetchPartyDetails,
+    enabled: !!partyId,
+    staleTime: 60 * 1000, // 1 minute
+  });
+
+  const tiersQuery = useQuery({
+    queryKey: queryKeys.partyTiers(partyId),
+    queryFn: fetchTicketTiersData,
+    enabled: !!partyId,
+    staleTime: 60 * 1000,
+  });
+
+  const party = partyQuery.data ?? null;
+  const loading = partyQuery.isLoading;
+  const ticketTiers: TicketTier[] = tiersQuery.data?.tiers ?? [];
+  const totalTickets = tiersQuery.data?.totalTickets ?? 0;
+  const totalSold = tiersQuery.data?.totalSold ?? 0;
+  const minPrice = tiersQuery.data?.minPrice ?? 0;
+  const currencySymbol = getCurrencySymbol(party?.currency_code || "NGN");
+
+  const invalidateParty = () => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.partyDetail(partyId) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.partyTiers(partyId) });
   };
 
   const handleRestockTier = async (tierId: string, currentQuantity: number) => {
@@ -293,7 +396,7 @@ export default function PartyDetailScreen() {
       if (partyError) throw partyError;
 
       setRestockAmounts((prev) => ({ ...prev, [tierId]: "" }));
-      await fetchTicketTiers();
+      await invalidateParty();
       Alert.alert("Success", "Tickets restocked successfully");
     } catch (error) {
       console.error("Error restocking tickets:", error);
@@ -336,7 +439,7 @@ export default function PartyDetailScreen() {
       }
 
       setEditingTierId(null);
-      await fetchTicketTiers();
+      await invalidateParty();
       Alert.alert("Success", "Tier updated successfully");
     } catch (error) {
       console.error("Error updating tier:", error);
@@ -368,7 +471,7 @@ export default function PartyDetailScreen() {
 
             if (error) throw error;
 
-            await fetchTicketTiers();
+            await invalidateParty();
             Alert.alert("Success", "Tier removed");
           } catch (error) {
             console.error("Error deleting tier:", error);
@@ -438,126 +541,13 @@ export default function PartyDetailScreen() {
       setNewTierName("");
       setNewTierPrice("");
       setNewTierQuantity("");
-      await fetchTicketTiers();
+      await invalidateParty();
       Alert.alert("Success", "New ticket tier added successfully");
     } catch (error) {
       console.error("Error adding ticket tier:", error);
       Alert.alert("Error", "Failed to add ticket tier");
     } finally {
       setSaving(false);
-    }
-  };
-
-  const fetchPartyDetails = async () => {
-    try {
-      const { data: partyData, error: partyError } = await supabase
-        .from("parties")
-        .select(
-          `
-          *,
-          host:profiles!host_id (
-            id,
-            username,
-            full_name,
-            avatar_url,
-            is_host
-          ),
-          host_profile:host_profiles!host_profile_id (
-            id,
-            name,
-            avatar_url
-          ),
-          media:party_media(*)
-        `,
-        )
-        .eq("id", partyId)
-        .single();
-
-      if (partyError) throw partyError;
-
-      // Sort media: primary first, then by display_order
-      if (partyData.media && Array.isArray(partyData.media)) {
-        // Filter out non-http(s) urls (broken legacy local paths)
-        partyData.media = partyData.media.filter(
-          (m: any) =>
-            m.media_url &&
-            (m.media_url.startsWith("http") || m.media_url.startsWith("https")),
-        );
-
-        partyData.media.sort((a: any, b: any) => {
-          if (a.is_primary) return -1;
-          if (b.is_primary) return 1;
-          return (a.display_order || 0) - (b.display_order || 0);
-        });
-      }
-
-      // Get engagement counts
-      const { count: likesCount } = await supabase
-        .from("party_likes")
-        .select("*", { count: "exact", head: true })
-        .eq("party_id", partyId);
-
-      const { count: commentsCount } = await supabase
-        .from("party_comments")
-        .select("*", { count: "exact", head: true })
-        .eq("party_id", partyId);
-
-      // Check engagement and tickets
-      let isLiked = false;
-      let isBookmarked = false;
-      let hasTicket = false;
-      let hasReviewed = false;
-
-      if (user) {
-        const [likeRes, bookmarkRes, ticketRes, reviewRes] = await Promise.all([
-          supabase
-            .from("party_likes")
-            .select("id")
-            .eq("party_id", partyId)
-            .eq("user_id", user.id)
-            .maybeSingle(),
-          supabase
-            .from("party_bookmarks")
-            .select("id")
-            .eq("party_id", partyId)
-            .eq("user_id", user.id)
-            .maybeSingle(),
-          supabase
-            .from("tickets")
-            .select("id")
-            .eq("party_id", partyId)
-            .eq("user_id", user.id)
-            .eq("payment_status", "completed")
-            .limit(1)
-            .maybeSingle(),
-          supabase
-            .from("reviews")
-            .select("id")
-            .eq("party_id", partyId)
-            .eq("reviewer_id", user.id)
-            .limit(1)
-            .maybeSingle(),
-        ]);
-        isLiked = !!likeRes.data;
-        isBookmarked = !!bookmarkRes.data;
-        hasTicket = !!ticketRes.data;
-        hasReviewed = !!reviewRes.data;
-      }
-
-      setParty({
-        ...partyData,
-        likes_count: likesCount || 0,
-        comments_count: commentsCount || 0,
-        is_liked: isLiked,
-        is_bookmarked: isBookmarked,
-        has_ticket: hasTicket,
-        has_reviewed: hasReviewed,
-      });
-    } catch (error) {
-      console.error("Error fetching party:", error);
-      Alert.alert("Error", "Failed to load party details");
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -802,7 +792,7 @@ export default function PartyDetailScreen() {
 
       if (dbError) throw dbError;
 
-      await fetchPartyDetails();
+      await invalidateParty();
       Alert.alert("Success", "Media added successfully");
     } catch (error: any) {
       console.error("Error adding media:", error);
@@ -832,7 +822,7 @@ export default function PartyDetailScreen() {
 
               if (error) throw error;
 
-              await fetchPartyDetails();
+              await invalidateParty();
             } catch (error) {
               console.error("Error deleting media:", error);
               Alert.alert("Error", "Failed to remove media");
@@ -847,15 +837,18 @@ export default function PartyDetailScreen() {
 
   const handleLike = async () => {
     if (!user || !party) return;
-
     const wasLiked = party.is_liked;
-
-    setParty({
-      ...party,
-      is_liked: !wasLiked,
-      likes_count: wasLiked ? party.likes_count! - 1 : party.likes_count! + 1,
-    });
-
+    const key = queryKeys.partyDetail(partyId);
+    // Optimistic update
+    queryClient.setQueryData(key, (old: Party | undefined) =>
+      old
+        ? {
+            ...old,
+            is_liked: !wasLiked,
+            likes_count: wasLiked ? old.likes_count! - 1 : old.likes_count! + 1,
+          }
+        : old,
+    );
     try {
       if (wasLiked) {
         await supabase
@@ -864,18 +857,24 @@ export default function PartyDetailScreen() {
           .eq("party_id", partyId)
           .eq("user_id", user.id);
       } else {
-        await supabase.from("party_likes").insert({
-          party_id: partyId,
-          user_id: user.id,
-        });
+        await supabase
+          .from("party_likes")
+          .insert({ party_id: partyId, user_id: user.id });
       }
     } catch (error) {
       console.error("Error toggling like:", error);
-      setParty({
-        ...party,
-        is_liked: wasLiked,
-        likes_count: wasLiked ? party.likes_count! + 1 : party.likes_count! - 1,
-      });
+      // Revert
+      queryClient.setQueryData(key, (old: Party | undefined) =>
+        old
+          ? {
+              ...old,
+              is_liked: wasLiked,
+              likes_count: wasLiked
+                ? old.likes_count! + 1
+                : old.likes_count! - 1,
+            }
+          : old,
+      );
     }
   };
 
@@ -887,7 +886,10 @@ export default function PartyDetailScreen() {
   const handleBookmark = async () => {
     if (!user || !party) return;
     const wasBookmarked = party.is_bookmarked;
-    setParty({ ...party, is_bookmarked: !wasBookmarked });
+    const key = queryKeys.partyDetail(partyId);
+    queryClient.setQueryData(key, (old: Party | undefined) =>
+      old ? { ...old, is_bookmarked: !wasBookmarked } : old,
+    );
     try {
       if (wasBookmarked) {
         await supabase
@@ -896,13 +898,14 @@ export default function PartyDetailScreen() {
           .eq("party_id", partyId)
           .eq("user_id", user.id);
       } else {
-        await supabase.from("party_bookmarks").insert({
-          party_id: partyId,
-          user_id: user.id,
-        });
+        await supabase
+          .from("party_bookmarks")
+          .insert({ party_id: partyId, user_id: user.id });
       }
     } catch (error) {
-      setParty({ ...party, is_bookmarked: wasBookmarked });
+      queryClient.setQueryData(key, (old: Party | undefined) =>
+        old ? { ...old, is_bookmarked: wasBookmarked } : old,
+      );
     }
   };
 
@@ -944,10 +947,12 @@ export default function PartyDetailScreen() {
                 Alert.alert("Error", "Could not identify the brand to block.");
                 return;
               }
-              const { error } = await supabase.from("blocked_host_profiles").insert({
-                blocker_id: user.id,
-                blocked_host_profile_id: party.host_profile.id,
-              });
+              const { error } = await supabase
+                .from("blocked_host_profiles")
+                .insert({
+                  blocker_id: user.id,
+                  blocked_host_profile_id: party.host_profile.id,
+                });
               if (error) throw error;
               Alert.alert(
                 "Brand Blocked",
@@ -1068,12 +1073,6 @@ export default function PartyDetailScreen() {
                         size={20}
                         color="#fff"
                       />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => router.push("/host/earnings")}
-                      className="w-10 h-10 rounded-full bg-black/50 items-center justify-center"
-                    >
-                      <Ionicons name="wallet-outline" size={20} color="#fff" />
                     </TouchableOpacity>
                   </View>
                 )}
@@ -1499,7 +1498,7 @@ export default function PartyDetailScreen() {
               </Text>
             </View>
             <Text className="text-gray-400 text-sm">
-                {ticketsRemaining} of {totalTickets} available
+              {ticketsRemaining} of {totalTickets} available
             </Text>
 
             {/* ✅ SHOW TIER BREAKDOWN IF MULTIPLE TIERS AND NOT TBA */}
@@ -1557,25 +1556,33 @@ export default function PartyDetailScreen() {
             {/* Review Button */}
             {!isEditing && party.has_ticket && eventEnded && (
               <TouchableOpacity
-                onPress={() => router.push({ pathname: "/party/[id]/review", params: { id: partyId } })}
+                onPress={() =>
+                  router.push({
+                    pathname: "/party/[id]/review",
+                    params: { id: partyId },
+                  })
+                }
                 disabled={party.has_reviewed}
                 className={`flex-row items-center px-4 py-2 rounded-xl border ${
-                  party.has_reviewed 
-                    ? "bg-green-500/10 border-green-500/30" 
+                  party.has_reviewed
+                    ? "bg-green-500/10 border-green-500/30"
                     : "bg-purple-600/20 border-purple-600/30"
                 }`}
               >
-                <Ionicons 
-                  name={party.has_reviewed ? "checkmark-circle" : "star-outline"} 
-                  size={18} 
-                  color={party.has_reviewed ? "#22c55e" : "#a855f7"} 
+                <Ionicons
+                  name={
+                    party.has_reviewed ? "checkmark-circle" : "star-outline"
+                  }
+                  size={18}
+                  color={party.has_reviewed ? "#22c55e" : "#a855f7"}
                 />
-                <Text className={`font-bold ml-2 ${party.has_reviewed ? "text-green-400" : "text-purple-400"}`}>
+                <Text
+                  className={`font-bold ml-2 ${party.has_reviewed ? "text-green-400" : "text-purple-400"}`}
+                >
                   {party.has_reviewed ? "Review Left" : "Rate Party"}
                 </Text>
               </TouchableOpacity>
             )}
-
 
             {isEditing && (
               <View className="flex-row items-center gap-3">
@@ -1708,7 +1715,9 @@ export default function PartyDetailScreen() {
                           onPress={() => setEditingTierId(null)}
                           className="flex-1 bg-white/5 py-3 rounded-xl items-center"
                         >
-                          <Text className="text-gray-400 font-bold">Cancel</Text>
+                          <Text className="text-gray-400 font-bold">
+                            Cancel
+                          </Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                           onPress={() => handleUpdateTier(tier.id)}
@@ -1723,15 +1732,21 @@ export default function PartyDetailScreen() {
                       <View className="flex-row justify-between items-start mb-3">
                         <View className="flex-1 mr-2">
                           <View className="flex-row items-center gap-2 mb-1">
-                            <Text className="text-white font-bold text-lg">{tier.name}</Text>
-                            <TouchableOpacity 
+                            <Text className="text-white font-bold text-lg">
+                              {tier.name}
+                            </Text>
+                            <TouchableOpacity
                               onPress={() => {
                                 setEditingTierId(tier.id);
                                 setEditTierName(tier.name);
                                 setEditTierPrice(tier.price.toString());
                               }}
                             >
-                              <Ionicons name="create-outline" size={16} color="#a855f7" />
+                              <Ionicons
+                                name="create-outline"
+                                size={16}
+                                color="#a855f7"
+                              />
                             </TouchableOpacity>
                           </View>
                           <Text className="text-gray-400 text-xs">
@@ -1740,19 +1755,26 @@ export default function PartyDetailScreen() {
                         </View>
                         <View className="items-end">
                           <Text className="text-purple-400 font-bold text-lg mb-2">
-                            {currencySymbol}{tier.price.toLocaleString()}
+                            {currencySymbol}
+                            {tier.price.toLocaleString()}
                           </Text>
-                          <TouchableOpacity 
-                            onPress={() => handleDeleteTier(tier.id, tier.quantity_sold)}
+                          <TouchableOpacity
+                            onPress={() =>
+                              handleDeleteTier(tier.id, tier.quantity_sold)
+                            }
                             className="bg-red-500/10 p-1.5 rounded-full"
                           >
-                            <Ionicons name="trash-outline" size={16} color="#ef4444" />
+                            <Ionicons
+                              name="trash-outline"
+                              size={16}
+                              color="#ef4444"
+                            />
                           </TouchableOpacity>
                         </View>
                       </View>
-                      
+
                       <View className="h-px bg-white/5 my-3" />
-                      
+
                       <View className="flex-row gap-3">
                         <TextInput
                           className="flex-1 bg-white/10 rounded-xl px-4 py-3 text-white"
@@ -1768,14 +1790,18 @@ export default function PartyDetailScreen() {
                           }
                         />
                         <TouchableOpacity
-                          onPress={() => handleRestockTier(tier.id, tier.quantity)}
+                          onPress={() =>
+                            handleRestockTier(tier.id, tier.quantity)
+                          }
                           disabled={saving}
                           className="bg-purple-600 px-6 py-3 rounded-xl justify-center"
                         >
                           {saving ? (
                             <ActivityIndicator size="small" color="#fff" />
                           ) : (
-                            <Text className="text-white font-bold">Restock</Text>
+                            <Text className="text-white font-bold">
+                              Restock
+                            </Text>
                           )}
                         </TouchableOpacity>
                       </View>
@@ -1834,4 +1860,7 @@ export default function PartyDetailScreen() {
       </Modal>
     </View>
   );
+}
+function setParty(arg0: Party) {
+  throw new Error("Function not implemented.");
 }

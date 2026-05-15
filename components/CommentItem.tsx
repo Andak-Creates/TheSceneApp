@@ -27,6 +27,7 @@ interface CommentItemProps {
   };
   onReply: (commentId: string, username: string) => void;
   onViewReplies: (commentId: string) => void;
+  onDelete?: (commentId: string) => void;
   isExpanded?: boolean;
   currentUserId?: string;
   partyHostId?: string;
@@ -40,6 +41,7 @@ export default function CommentItem({
   comment,
   onReply,
   onViewReplies,
+  onDelete,
   isExpanded = false,
   currentUserId,
   partyHostId,
@@ -150,14 +152,25 @@ export default function CommentItem({
     }
   };
 
+
+
   const handleCommentOptions = () => {
     if (!user) return;
     const isOwnComment = comment.user.id === user.id;
 
     if (isOwnComment) {
-      Alert.alert("Options", "This is your comment.", [
-        { text: "Cancel", style: "cancel" }
-      ]);
+      Alert.alert(
+        "Comment Options",
+        "Choose an action",
+        [
+          {
+            text: "Delete Comment",
+            style: "destructive",
+            onPress: () => onDelete?.(comment.id),
+          },
+          { text: "Cancel", style: "cancel" },
+        ]
+      );
       return;
     }
 

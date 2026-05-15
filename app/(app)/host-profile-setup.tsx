@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import { supabase } from "../../lib/supabase";
+import { uploadToCloudinary } from "../../lib/cloudinary";
 import { useAuthStore } from "../../stores/authStore";
 import { useUserStore } from "../../stores/userStore";
 
@@ -67,7 +68,8 @@ export default function HostProfileSetupScreen() {
 
     if (!result.canceled && result.assets[0].uri) {
       setAvatarUri(result.assets[0].uri);
-      setAvatarBase64(result.assets[0].base64 || null);
+      // We no longer need base64 for Cloudinary, but we keep it here to indicate an unsaved change
+      setAvatarBase64("changed");
     }
   };
 
@@ -82,22 +84,11 @@ export default function HostProfileSetupScreen() {
     try {
       let publicUrl = avatarUri?.startsWith("http") ? avatarUri : null;
 
-      if (avatarBase64) {
-        const fileExt = avatarUri?.split(".").pop() || "jpg";
-        const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-        const filePath = `${user.id}/host-profiles/${fileName}`;
-
-        const { error: uploadError } = await supabase.storage
-          .from("avatars")
-          .upload(filePath, decode(avatarBase64), {
-            contentType: `image/${fileExt}`,
-            upsert: true,
-          });
-
-        if (uploadError) throw uploadError;
-
-        const { data } = supabase.storage.from("avatars").getPublicUrl(filePath);
-        publicUrl = data.publicUrl;
+      if (avatarBase64 && avatarUri && !avatarUri.startsWith("http")) {
+        console.log("📤 Uploading host avatar to Cloudinary...");
+        const folder = `host-profiles/${user.id}`;
+        const uploadResult = await uploadToCloudinary(avatarUri, "image", folder);
+        publicUrl = uploadResult.url;
       }
 
       if (selectedProfileId) {

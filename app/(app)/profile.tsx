@@ -17,6 +17,9 @@ import {
 import PartyCard from "../../components/PartyCard";
 import { detectUserLocation } from "../../lib/location";
 import { supabase } from "../../lib/supabase";
+import { uploadToCloudinary } from "../../lib/cloudinary";
+import { queryKeys } from "../../lib/queryKeys";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "../../stores/authStore";
 import { useUserStore } from "../../stores/userStore";
 
@@ -36,19 +39,9 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { user, signOut } = useAuthStore();
   const { profile, fetchProfile } = useUserStore();
-  const [hostedParties, setHostedParties] = useState<any[]>([]);
-  const [repostedParties, setRepostedParties] = useState<any[]>([]);
-  const [upcomingParties, setUpcomingParties] = useState<any[]>([]);
-  const [pastParties, setPastParties] = useState<any[]>([]);
-  const [savedParties, setSavedParties] = useState<any[]>([]);
+  const queryClient = useQueryClient();
 
-  const [stats, setStats] = useState<Stats>({
-    partiesAttended: 0,
-    following: 0,
-    followers: 0,
-  });
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  // UI-only state (not fetched data)
   const [signingOut, setSigningOut] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("reposts");
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -61,157 +54,123 @@ export default function ProfileScreen() {
   const [saving, setSaving] = useState(false);
   const [detectingLocation, setDetectingLocation] = useState(false);
   const [isHostAdmin, setIsHostAdmin] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const fetchAllTabData = async () => {
-    if (!user) return;
+  // ---------------------------------------------------------------------------
+  // Pure async functions — return data, do NOT call setState
+  // ---------------------------------------------------------------------------
+  async function fetchTabData() {
+    if (!user) return null;
     const now = new Date();
-
-    try {
-      // Hosted parties (for host users) — fetched once, used for both Hosted tab and Upcoming merge
-      let hostedAll: any[] = [];
-      if (profile?.is_host) {
-        const { data: hosted } = await supabase
-          .from("parties")
-          .select(`*, party_media(thumbnail_url, media_type, is_primary)`)
-          .eq("host_id", user.id)
-          .order("date", { ascending: false });
-        hostedAll = (hosted || []).map((p: any) => {
-          const mediaRows: any[] = p.party_media || [];
-          const primaryMedia = mediaRows.find((m: any) => m.is_primary) || mediaRows[0];
-          return {
-            ...p,
-            thumbnail_url: primaryMedia?.media_type === "video" ? primaryMedia?.thumbnail_url ?? null : null,
-          };
-        });
-      }
-
-      // Reposts
-      const { data: repostData } = await supabase
-        .from("party_reposts")
-        .select(`party:parties(*, party_media(thumbnail_url, media_type, is_primary))`)
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false });
-      const reposts = (repostData || []).map((r: any) => r.party).filter(Boolean).map((p: any) => {
+    let hostedAll: any[] = [];
+    if (profile?.is_host) {
+      const { data: hosted } = await supabase
+        .from("parties")
+        .select(`*, party_media(thumbnail_url, media_type, is_primary)`)
+        .eq("host_id", user.id)
+        .order("date", { ascending: false });
+      hostedAll = (hosted || []).map((p: any) => {
         const mediaRows: any[] = p.party_media || [];
         const primaryMedia = mediaRows.find((m: any) => m.is_primary) || mediaRows[0];
-        return {
-          ...p,
-          thumbnail_url: primaryMedia?.media_type === "video" ? primaryMedia?.thumbnail_url ?? null : null,
-        };
+        return { ...p, thumbnail_url: primaryMedia?.media_type === "video" ? primaryMedia?.thumbnail_url ?? null : null };
       });
-
-      // Tickets (for upcoming/past)
-      const { data: ticketData } = await supabase
-        .from("tickets")
-        .select(`party:parties(*, party_media(thumbnail_url, media_type, is_primary))`)
-        .eq("user_id", user.id)
-        .eq("payment_status", "completed");
-      const ticketParties = (ticketData || []).map((t: any) => t.party).filter(Boolean).map((p: any) => {
-        const mediaRows: any[] = p.party_media || [];
-        const primaryMedia = mediaRows.find((m: any) => m.is_primary) || mediaRows[0];
-        return {
-          ...p,
-          thumbnail_url: primaryMedia?.media_type === "video" ? primaryMedia?.thumbnail_url ?? null : null,
-        };
-      });
-
-      // Hosted future + ticket future merged (deduplicated)
-      const hostedFuture = hostedAll.filter((p) => p.date_tba || !p.date || new Date(p.date) >= now);
-      const allUpcoming = [
-        ...hostedFuture,
-        ...ticketParties.filter((p: any) => p.date_tba || !p.date || new Date(p.date) >= now),
-      ];
-      const seen = new Set<string>();
-      const deduped = allUpcoming.filter((p: any) => {
-        if (seen.has(p.id)) return false;
-        seen.add(p.id);
-        return true;
-      });
-
-      // Saved / Bookmarked parties
-      const { data: bookmarkData } = await supabase
-        .from("party_bookmarks")
-        .select(`party:parties(*, party_media(thumbnail_url, media_type, is_primary))`)
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false });
-      const saved = (bookmarkData || []).map((b: any) => b.party).filter(Boolean).map((p: any) => {
-        const mediaRows: any[] = p.party_media || [];
-        const primaryMedia = mediaRows.find((m: any) => m.is_primary) || mediaRows[0];
-        return {
-          ...p,
-          thumbnail_url: primaryMedia?.media_type === "video" ? primaryMedia?.thumbnail_url ?? null : null,
-        };
-      });
-
-      // Batch fetch view counts for all unique party IDs in one query
-      const allParties = [...hostedAll, ...ticketParties, ...reposts, ...saved];
-      const uniqueIds = [...new Set(allParties.map((p: any) => p.id).filter(Boolean))];
-      let viewsMap: Record<string, number> = {};
-      if (uniqueIds.length > 0) {
-        const { data: viewRows } = await supabase
-          .from("party_views")
-          .select("party_id")
-          .in("party_id", uniqueIds);
-        for (const row of viewRows || []) {
-          viewsMap[row.party_id] = (viewsMap[row.party_id] || 0) + 1;
-        }
-      }
-      const addViews = (arr: any[]) => arr.map((p) => ({ ...p, views_count: viewsMap[p.id] || 0 }));
-
-      // Reviews (to hide rate button for those already reviewed)
-      const { data: userReviews } = await supabase
-        .from("reviews")
-        .select("party_id")
-        .eq("reviewer_id", user.id);
-      const reviewedPartyIds = new Set((userReviews || []).map((r: any) => r.party_id));
-
-      setHostedParties(addViews(hostedAll));
-      setRepostedParties(addViews(reposts));
-      setUpcomingParties(addViews(deduped));
-
-      // Past = ticket-attended past parties + hosted past parties (for hosts), deduplicated
-      const ticketPast = ticketParties.filter((p: any) => !p.date_tba && p.date && new Date(p.date) < now);
-      const hostedPast = hostedAll.filter((p: any) => !p.date_tba && p.date && new Date(p.date) < now);
-      const allPast = [...ticketPast, ...hostedPast];
-      const pastSeen = new Set<string>();
-      const dedupedPast = allPast.filter((p: any) => {
-        if (pastSeen.has(p.id)) return false;
-        pastSeen.add(p.id);
-        return true;
-      });
-
-      // Mark which past parties can be reviewed (user had ticket and hasn't reviewed yet)
-      const ticketPastIds = new Set(ticketPast.map(p => p.id));
-      const pastWithReviewState = dedupedPast.map(p => ({
-        ...p,
-        can_review: ticketPastIds.has(p.id) && !reviewedPartyIds.has(p.id)
-      }));
-
-      setPastParties(addViews(pastWithReviewState));
-      setSavedParties(addViews(saved));
-    } catch (e) {
-      console.error("Failed to fetch tab data:", e);
     }
-  };
+    const { data: repostData } = await supabase
+      .from("party_reposts")
+      .select(`party:parties(*, party_media(thumbnail_url, media_type, is_primary))`)
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+    const reposts = (repostData || []).map((r: any) => r.party).filter(Boolean).map((p: any) => {
+      const mediaRows: any[] = p.party_media || [];
+      const primaryMedia = mediaRows.find((m: any) => m.is_primary) || mediaRows[0];
+      return { ...p, thumbnail_url: primaryMedia?.media_type === "video" ? primaryMedia?.thumbnail_url ?? null : null };
+    });
+    const { data: ticketData } = await supabase
+      .from("tickets")
+      .select(`party:parties(*, party_media(thumbnail_url, media_type, is_primary))`)
+      .eq("user_id", user.id)
+      .eq("payment_status", "completed");
+    const ticketParties = (ticketData || []).map((t: any) => t.party).filter(Boolean).map((p: any) => {
+      const mediaRows: any[] = p.party_media || [];
+      const primaryMedia = mediaRows.find((m: any) => m.is_primary) || mediaRows[0];
+      return { ...p, thumbnail_url: primaryMedia?.media_type === "video" ? primaryMedia?.thumbnail_url ?? null : null };
+    });
+    const hostedFuture = hostedAll.filter((p) => p.date_tba || !p.date || new Date(p.date) >= now);
+    const allUpcoming = [...hostedFuture, ...ticketParties.filter((p: any) => p.date_tba || !p.date || new Date(p.date) >= now)];
+    const seen = new Set<string>();
+    const deduped = allUpcoming.filter((p: any) => { if (seen.has(p.id)) return false; seen.add(p.id); return true; });
+    const { data: bookmarkData } = await supabase
+      .from("party_bookmarks")
+      .select(`party:parties(*, party_media(thumbnail_url, media_type, is_primary))`)
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+    const saved = (bookmarkData || []).map((b: any) => b.party).filter(Boolean).map((p: any) => {
+      const mediaRows: any[] = p.party_media || [];
+      const primaryMedia = mediaRows.find((m: any) => m.is_primary) || mediaRows[0];
+      return { ...p, thumbnail_url: primaryMedia?.media_type === "video" ? primaryMedia?.thumbnail_url ?? null : null };
+    });
+    const allParties = [...hostedAll, ...ticketParties, ...reposts, ...saved];
+    const uniqueIds = [...new Set(allParties.map((p: any) => p.id).filter(Boolean))];
+    let viewsMap: Record<string, number> = {};
+    if (uniqueIds.length > 0) {
+      const { data: viewRows } = await supabase.from("party_view_counts").select("party_id, view_count").in("party_id", uniqueIds);
+      for (const row of viewRows || []) viewsMap[row.party_id] = Number(row.view_count) || 0;
+    }
+    const addViews = (arr: any[]) => arr.map((p) => ({ ...p, views_count: viewsMap[p.id] || 0 }));
+    const { data: userReviews } = await supabase.from("reviews").select("party_id").eq("reviewer_id", user.id);
+    const reviewedPartyIds = new Set((userReviews || []).map((r: any) => r.party_id));
+    const ticketPast = ticketParties.filter((p: any) => !p.date_tba && p.date && new Date(p.date) < now);
+    const hostedPast = hostedAll.filter((p: any) => !p.date_tba && p.date && new Date(p.date) < now);
+    const allPast = [...ticketPast, ...hostedPast];
+    const pastSeen = new Set<string>();
+    const dedupedPast = allPast.filter((p: any) => { if (pastSeen.has(p.id)) return false; pastSeen.add(p.id); return true; });
+    const ticketPastIds = new Set(ticketPast.map(p => p.id));
+    const pastWithReviewState = dedupedPast.map(p => ({ ...p, can_review: ticketPastIds.has(p.id) && !reviewedPartyIds.has(p.id) }));
+    return {
+      hostedParties: addViews(hostedAll),
+      repostedParties: addViews(reposts),
+      upcomingParties: addViews(deduped),
+      pastParties: addViews(pastWithReviewState),
+      savedParties: addViews(saved),
+    };
+  }
 
+
+  // ---------------------------------------------------------------------------
+  // useQuery hooks — auto-fetch on mount, cache for 2 minutes
+  // These reference fetchTabData (above) and fetchStatsData (below).
+  // async function declarations are hoisted, so this ordering is safe.
+  // ---------------------------------------------------------------------------
+  const statsQuery = useQuery({
+    queryKey: queryKeys.profileStats(user?.id ?? ""),
+    queryFn: fetchStatsData,
+    enabled: !!user,
+    staleTime: 2 * 60 * 1000,
+  });
+
+  const tabsQuery = useQuery({
+    queryKey: queryKeys.profileTabs(user?.id ?? ""),
+    queryFn: fetchTabData,
+    enabled: !!user && !!profile,
+    staleTime: 2 * 60 * 1000,
+  });
+
+  const stats: Stats = statsQuery.data ?? { partiesAttended: 0, following: 0, followers: 0 };
+  const loading = statsQuery.isLoading || tabsQuery.isLoading;
+  const hostedParties: any[] = tabsQuery.data?.hostedParties ?? [];
+  const repostedParties: any[] = tabsQuery.data?.repostedParties ?? [];
+  const upcomingParties: any[] = tabsQuery.data?.upcomingParties ?? [];
+  const pastParties: any[] = tabsQuery.data?.pastParties ?? [];
+  const savedParties: any[] = tabsQuery.data?.savedParties ?? [];
 
   useEffect(() => {
     if (user && profile) {
-      fetchUserStats();
-      fetchUserCity();
-      fetchAllTabData();
       setEditBio(profile.bio || "");
       setEditFullName(profile.full_name || "");
     }
-
-    // Check if user is a host-level admin (even without is_host flag)
     const checkHostAdmin = async () => {
       if (!user) return;
-      const { data } = await supabase
-        .from("host_admins")
-        .select("id")
-        .eq("user_id", user.id)
-        .limit(1);
+      const { data } = await supabase.from("host_admins").select("id").eq("user_id", user.id).limit(1);
       setIsHostAdmin(!!data && data.length > 0);
     };
     checkHostAdmin();
@@ -221,51 +180,32 @@ export default function ProfileScreen() {
   const isFirstFocus = useRef(true);
   useFocusEffect(
     useCallback(() => {
-      // Skip the very first focus — the useEffect above already handles the initial load
       if (isFirstFocus.current) {
         isFirstFocus.current = false;
         return;
       }
       if (!user) return;
-      fetchUserStats();
-      fetchAllTabData();
+      statsQuery.refetch();
+      tabsQuery.refetch();
     }, [user])
   );
 
-  // Supabase Realtime — live updates while the screen is open
+  // Supabase Realtime — invalidates cache so useQuery auto-refetches
   useEffect(() => {
     if (!user) return;
+    const invalidateStats = () =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.profileStats(user.id) });
+    const invalidateTabs = () =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.profileTabs(user.id) });
 
     const channel = supabase
       .channel(`profile-realtime-${user.id}`)
-      // Follower / following changes
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "follows", filter: `following_id=eq.${user.id}` },
-        () => fetchUserStats()
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "follows", filter: `follower_id=eq.${user.id}` },
-        () => fetchUserStats()
-      )
-      // Bookmark / save changes
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "party_bookmarks", filter: `user_id=eq.${user.id}` },
-        () => fetchAllTabData()
-      )
-      // Repost changes
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "party_reposts", filter: `user_id=eq.${user.id}` },
-        () => fetchAllTabData()
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "follows", filter: `following_id=eq.${user.id}` }, invalidateStats)
+      .on("postgres_changes", { event: "*", schema: "public", table: "follows", filter: `follower_id=eq.${user.id}` }, invalidateStats)
+      .on("postgres_changes", { event: "*", schema: "public", table: "party_bookmarks", filter: `user_id=eq.${user.id}` }, invalidateTabs)
+      .on("postgres_changes", { event: "*", schema: "public", table: "party_reposts", filter: `user_id=eq.${user.id}` }, invalidateTabs)
       .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [user?.id]);
 
   const fetchUserCity = async () => {
@@ -306,93 +246,36 @@ export default function ProfileScreen() {
     }
   };
 
-  const fetchUserStats = async () => {
-    if (!user) return;
-
-    try {
-      const { count: attended } = await supabase
-        .from("tickets")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", user.id)
-        .eq("payment_status", "completed");
-
-      const { count: following } = await supabase
-        .from("follows")
-        .select("*", { count: "exact", head: true })
-        .eq("follower_id", user.id);
-
-      const { count: followers } = await supabase
-        .from("follows")
-        .select("*", { count: "exact", head: true })
-        .eq("following_id", user.id);
-
-      const baseStats = {
-        partiesAttended: attended || 0,
-        following: following || 0,
-        followers: followers || 0,
-      };
-
-      if (profile?.is_host) {
-        const { count: hosted } = await supabase
-          .from("parties")
-          .select("*", { count: "exact", head: true })
-          .eq("host_id", user.id);
-
-        // ✅ FETCH TIER DATA TO CALCULATE TICKETS SOLD
-        const { data: parties } = await supabase
-          .from("parties")
-          .select("id")
-          .eq("host_id", user.id);
-
-        let totalTickets = 0;
-        if (parties) {
-          for (const party of parties) {
-            const { data: tiers } = await supabase
-              .from("ticket_tiers")
-              .select("quantity_sold")
-              .eq("party_id", party.id)
-              .eq("is_active", true);
-
-            const partySold =
-              tiers?.reduce((sum, t) => sum + (t.quantity_sold || 0), 0) || 0;
-            totalTickets += partySold;
-          }
+  // Pure stats fetcher — returns data for useQuery (defined above)
+  async function fetchStatsData(): Promise<Stats> {
+    if (!user) return { partiesAttended: 0, following: 0, followers: 0 };
+    const { count: attended } = await supabase.from("tickets").select("*", { count: "exact", head: true }).eq("user_id", user.id).eq("payment_status", "completed");
+    const { count: following } = await supabase.from("follows").select("*", { count: "exact", head: true }).eq("follower_id", user.id);
+    const { count: followers } = await supabase.from("follows").select("*", { count: "exact", head: true }).eq("following_id", user.id);
+    const baseStats = { partiesAttended: attended || 0, following: following || 0, followers: followers || 0 };
+    if (profile?.is_host) {
+      const { count: hosted } = await supabase.from("parties").select("*", { count: "exact", head: true }).eq("host_id", user.id);
+      const { data: parties } = await supabase.from("parties").select("id").eq("host_id", user.id);
+      let totalTickets = 0;
+      if (parties) {
+        for (const party of parties) {
+          const { data: tiers } = await supabase.from("ticket_tiers").select("quantity_sold").eq("party_id", party.id).eq("is_active", true);
+          totalTickets += tiers?.reduce((sum, t) => sum + (t.quantity_sold || 0), 0) || 0;
         }
-
-        const { data: reviews } = await supabase
-          .from("reviews")
-          .select("rating")
-          .eq("host_id", user.id);
-
-        const avgRating =
-          reviews && reviews.length
-            ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length
-            : 0;
-
-        setStats({
-          ...baseStats,
-          partiesHosted: hosted || 0,
-          totalTicketsSold: totalTickets, // ✅ USE TIER-BASED COUNT
-          averageRating: avgRating,
-          totalReviews: reviews?.length || 0,
-        });
-      } else {
-        setStats(baseStats);
       }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-      setRefreshing(false); // ✅ STOP REFRESHING
+      const { data: reviews } = await supabase.from("reviews").select("rating").eq("host_id", user.id);
+      const avgRating = reviews && reviews.length ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length : 0;
+      return { ...baseStats, partiesHosted: hosted || 0, totalTicketsSold: totalTickets, averageRating: avgRating, totalReviews: reviews?.length || 0 };
     }
-  };
+    return baseStats;
+  }
 
   const handleRefresh = async () => {
     if (!user) return;
     setRefreshing(true);
     await fetchProfile(user.id);
-    fetchUserStats();        // refetches stats (also clears refreshing spinner)
-    fetchAllTabData();       // refetches all party lists
+    await Promise.all([statsQuery.refetch(), tabsQuery.refetch()]);
+    setRefreshing(false);
   };
 
   const handleAvatarChange = async () => {
@@ -410,49 +293,20 @@ export default function ProfileScreen() {
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.7,
-        base64: true,
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
       });
 
-      if (result.canceled || !result.assets[0].base64) return;
+      if (result.canceled || !result.assets[0].uri) return;
 
       setUploadingAvatar(true);
 
-      const image = result.assets[0];
-      const fileExt = image.uri.split(".").pop() || "jpg";
-      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-      const filePath = `${user.id}/${fileName}`;
+      const imageUri = result.assets[0].uri;
+      const folder = `avatars/${user.id}`;
 
-      console.log("📤 Uploading to:", filePath);
+      console.log("📤 Uploading to Cloudinary...");
 
-      // Delete old avatar if exists
-      if (profile?.avatar_url) {
-        const oldPath = profile.avatar_url.split("/avatars/")[1];
-        if (oldPath) {
-          console.log("🗑️ Deleting old avatar:", oldPath);
-          await supabase.storage.from("avatars").remove([oldPath]);
-        }
-      }
-
-      // Upload new avatar
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from("avatars")
-        .upload(filePath, decode(image.base64!), {
-          contentType: `image/${fileExt}`,
-          upsert: true,
-        });
-
-      if (uploadError) {
-        console.error("❌ Upload error:", uploadError);
-        throw uploadError;
-      }
-
-      console.log("✅ Upload successful!");
-
-      // Get public URL
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from("avatars").getPublicUrl(filePath);
+      const uploadResult = await uploadToCloudinary(imageUri, "image", folder);
+      const publicUrl = uploadResult.url;
 
       console.log("🔗 Public URL:", publicUrl);
 
@@ -624,8 +478,8 @@ export default function ProfileScreen() {
             <Text className="text-white text-xl font-bold text-center">
               {profile.full_name || profile.username}
             </Text>
-            <Text className="text-gray-400 text-center">
-              @{profile.username}
+            <Text className="text-gray-400 text-base mb-3 text-center">
+              @{profile.username.toLowerCase().replace(/\s+/g, '-')}
             </Text>
           </View>
         )}

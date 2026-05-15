@@ -16,6 +16,8 @@ import {
 } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import { supabase } from "../../../lib/supabase";
+import { queryKeys } from "../../../lib/queryKeys";
+import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "../../../stores/authStore";
 
 interface PartyAnalytics {
@@ -89,17 +91,10 @@ export default function PartyAnalyticsScreen() {
   const params = useLocalSearchParams();
   const partyId = params.id as string;
 
-  const [analytics, setAnalytics] = useState<PartyAnalytics | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [attendeeFilter, setAttendeeFilter] = useState<
     "all" | "checked-in" | "not-checked-in"
   >("all");
-
-  useEffect(() => {
-    fetchAnalytics();
-  }, [partyId]);
 
   // Inside the component:
   const { setFeedActive } = useAudioStore();
@@ -113,233 +108,113 @@ export default function PartyAnalyticsScreen() {
     }, []),
   );
 
-  const fetchAnalytics = async () => {
-    if (!user) return;
+  // ---------------------------------------------------------------------------
+  // Pure fetch function — returned data used by useQuery
+  // ---------------------------------------------------------------------------
+  const fetchAnalytics = async (): Promise<PartyAnalytics> => {
+    if (!user) throw new Error("Not authenticated");
 
-    try {
-      // Fetch party details
-      const { data: party, error: partyError } = await supabase
-        .from("parties")
-        .select(`
-          id, title, flyer_url, date, location, city, host_id,
-          media:party_media(media_url, media_type, thumbnail_url, is_primary)
-        `)
-        .eq("id", partyId)
-        .single();
+    const { data: party, error: partyError } = await supabase
+      .from("parties")
+      .select(`id, title, flyer_url, date, location, city, host_id,
+        media:party_media(media_url, media_type, thumbnail_url, is_primary)`)
+      .eq("id", partyId)
+      .single();
+    if (partyError) throw partyError;
+    if (party.host_id !== user.id) { router.back(); throw new Error("Unauthorized"); }
 
-      if (partyError) throw partyError;
+    const { data: tiers, error: tiersError } = await supabase.from("ticket_tiers").select("*").eq("party_id", partyId).eq("is_active", true).order("tier_order", { ascending: true });
+    if (tiersError) throw tiersError;
 
-      // Verify user is the host
-      if (party.host_id !== user.id) {
-        router.back();
-        return;
-      }
+    const { data: tickets, error: ticketsError } = await supabase
+      .from("tickets")
+      .select(`id, user_id, guest_name, guest_email, quantity_purchased, quantity_used, purchased_at, total_paid, ticket_tier_id,
+        profiles:user_id (username, full_name, avatar_url)`)
+      .eq("party_id", partyId).eq("payment_status", "completed");
+    if (ticketsError) throw ticketsError;
 
-      // Fetch ticket tiers with stats
-      const { data: tiers, error: tiersError } = await supabase
-        .from("ticket_tiers")
-        .select("*")
-        .eq("party_id", partyId)
-        .eq("is_active", true)
-        .order("tier_order", { ascending: true });
+    const ticketIds = tickets?.map((t) => t.id) || [];
+    const { data: checkIns, error: checkInsError } = await supabase
+      .from("ticket_check_ins").select("*").in("ticket_id", ticketIds).order("checked_in_at", { ascending: false });
+    if (checkInsError) throw checkInsError;
 
-      if (tiersError) throw tiersError;
+    const tierStats = (tiers || []).map((tier) => {
+      const tierTickets = tickets?.filter((t) => t.ticket_tier_id === tier.id) || [];
+      const tierCheckIns = tierTickets.reduce((sum, ticket) =>
+        sum + (checkIns?.filter((ci) => ci.ticket_id === ticket.id).length || 0), 0);
+      return { id: tier.id, name: tier.name, price: tier.price, quantity: tier.quantity,
+        sold: tier.quantity_sold || 0, revenue: tier.price * (tier.quantity_sold || 0), checkedIn: tierCheckIns };
+    });
 
-      // Fetch all tickets for this party
-      const { data: tickets, error: ticketsError } = await supabase
-        .from("tickets")
-        .select(
-          `
-          id,
-          user_id,
-          guest_name,
-          guest_email,
-          quantity_purchased,
-          quantity_used,
-          purchased_at,
-          total_paid,
-          ticket_tier_id,
-          profiles:user_id (
-            username,
-            full_name,
-            avatar_url
-          )
-        `,
-        )
-        .eq("party_id", partyId)
-        .eq("payment_status", "completed");
+    const totalCapacity = tierStats.reduce((s, t) => s + t.quantity, 0);
+    const totalSold     = tierStats.reduce((s, t) => s + t.sold, 0);
+    const totalRevenue  = tierStats.reduce((s, t) => s + t.revenue, 0);
+    const totalCheckedIn = checkIns?.length || 0;
+    const checkInRate = totalSold > 0 ? (totalCheckedIn / totalSold) * 100 : 0;
 
-      if (ticketsError) throw ticketsError;
+    const attendees = (tickets || []).map((ticket) => {
+      const lastCheckIn = checkIns?.find((ci) => ci.ticket_id === ticket.id);
+      const tier = tiers?.find((t) => t.id === ticket.ticket_tier_id);
+      return {
+        id: ticket.id, user_id: ticket.user_id,
+        buyer_name: (ticket.profiles as any)?.full_name || (ticket.profiles as any)?.username ||
+          (ticket as any).guest_name || (ticket as any).guest_email || "Unknown",
+        buyer_avatar: (ticket.profiles as any)?.avatar_url || null,
+        quantity_purchased: ticket.quantity_purchased, quantity_used: ticket.quantity_used,
+        purchased_at: ticket.purchased_at, total_paid: ticket.total_paid,
+        tier_name: tier?.name || "General",
+        last_check_in: lastCheckIn?.checked_in_at || null,
+      };
+    }).sort((a, b) => {
+      if (a.quantity_used > 0 && b.quantity_used === 0) return -1;
+      if (a.quantity_used === 0 && b.quantity_used > 0) return 1;
+      return new Date(b.purchased_at).getTime() - new Date(a.purchased_at).getTime();
+    });
 
-      // Fetch check-in records
-      const ticketIds = tickets?.map((t) => t.id) || [];
-      const { data: checkIns, error: checkInsError } = await supabase
-        .from("ticket_check_ins")
-        .select("*")
-        .in("ticket_id", ticketIds)
-        .order("checked_in_at", { ascending: false });
+    const timeline: { [key: string]: number } = {};
+    checkIns?.forEach((ci) => { const h = `${new Date(ci.checked_in_at).getHours()}:00`; timeline[h] = (timeline[h] || 0) + 1; });
+    const checkInTimeline = Object.entries(timeline).map(([hour, count]) => ({ hour, count })).sort((a, b) => parseInt(a.hour) - parseInt(b.hour));
 
-      if (checkInsError) throw checkInsError;
-
-      // Calculate tier stats
-      const tierStats = (tiers || []).map((tier) => {
-        const tierTickets =
-          tickets?.filter((t) => t.ticket_tier_id === tier.id) || [];
-        const tierCheckIns = tierTickets.reduce((sum, ticket) => {
-          return (
-            sum +
-            (checkIns?.filter((ci) => ci.ticket_id === ticket.id).length || 0)
-          );
-        }, 0);
-
-        return {
-          id: tier.id,
-          name: tier.name,
-          price: tier.price,
-          quantity: tier.quantity,
-          sold: tier.quantity_sold || 0,
-          revenue: tier.price * (tier.quantity_sold || 0),
-          checkedIn: tierCheckIns,
-        };
-      });
-
-      // Calculate overall stats
-      const totalCapacity = tierStats.reduce((sum, t) => sum + t.quantity, 0);
-      const totalSold = tierStats.reduce((sum, t) => sum + t.sold, 0);
-      const totalRevenue = tierStats.reduce((sum, t) => sum + t.revenue, 0);
-      const totalCheckedIn = checkIns?.length || 0;
-      const checkInRate =
-        totalSold > 0 ? (totalCheckedIn / totalSold) * 100 : 0;
-
-      // Build attendees list
-      const attendees = (tickets || [])
-        .map((ticket) => {
-          const lastCheckIn = checkIns?.find(
-            (ci) => ci.ticket_id === ticket.id,
-          );
-          const tier = tiers?.find((t) => t.id === ticket.ticket_tier_id);
-
-          return {
-            id: ticket.id,
-            user_id: ticket.user_id,
-            buyer_name:
-              (ticket.profiles as any)?.full_name ||
-              (ticket.profiles as any)?.username ||
-              (ticket as any).guest_name ||
-              (ticket as any).guest_email ||
-              "Unknown",
-            buyer_avatar: (ticket.profiles as any)?.avatar_url || null,
-            quantity_purchased: ticket.quantity_purchased,
-            quantity_used: ticket.quantity_used,
-            purchased_at: ticket.purchased_at,
-            total_paid: ticket.total_paid,
-            tier_name: tier?.name || "General",
-            last_check_in: lastCheckIn?.checked_in_at || null,
-          };
-        })
-        .sort((a, b) => {
-          // Sort by check-in status, then by purchase date
-          if (a.quantity_used > 0 && b.quantity_used === 0) return -1;
-          if (a.quantity_used === 0 && b.quantity_used > 0) return 1;
-          return (
-            new Date(b.purchased_at).getTime() -
-            new Date(a.purchased_at).getTime()
-          );
-        });
-
-      // Build check-in timeline (hourly)
-      const timeline: { [key: string]: number } = {};
-      checkIns?.forEach((checkIn) => {
-        const hour = new Date(checkIn.checked_in_at).getHours();
-        const hourKey = `${hour}:00`;
-        timeline[hourKey] = (timeline[hourKey] || 0) + 1;
-      });
-
-      const checkInTimeline = Object.entries(timeline)
-        .map(([hour, count]) => ({ hour, count }))
-        .sort((a, b) => parseInt(a.hour) - parseInt(b.hour));
-
-      // Calculate View Stats
-      const { data: viewsData } = await supabase
-        .from("party_views")
-        .select("user_id")
-        .eq("party_id", partyId)
-        .not("user_id", "is", null);
-
-      const { data: followersData } = await supabase
-        .from("follows")
-        .select("follower_id")
-        .eq("following_id", party.host_id);
-
-      const followerIds = new Set(followersData?.map((f: any) => f.follower_id) || []);
-      
-      let followerViews = 0;
-      let platformViews = 0;
-
-      const uniqueViewerIds = new Set(viewsData?.map((v: any) => v.user_id) || []);
-      const totalViews = uniqueViewerIds.size;
-
-      uniqueViewerIds.forEach(userId => {
-        if (followerIds.has(userId)) {
-          followerViews++;
-        } else {
-          platformViews++;
-        }
-      });
-
-      const followerPercent = totalViews > 0 ? (followerViews / totalViews) * 100 : 0;
-      const platformPercent = totalViews > 0 ? (platformViews / totalViews) * 100 : 0;
-
-      // Recent check-ins
-      const recentCheckIns = (checkIns || []).slice(0, 10).map((checkIn) => {
-        const ticket = tickets?.find((t) => t.id === checkIn.ticket_id);
-        return {
-          id: checkIn.id,
-          buyer_name:
-            (ticket?.profiles as any)?.full_name ||
-            (ticket?.profiles as any)?.username ||
-            (ticket as any)?.guest_name ||
-            (ticket as any)?.guest_email ||
-            "Unknown",
-          buyer_avatar: (ticket?.profiles as any)?.avatar_url || null,
-          checked_in_at: checkIn.checked_in_at,
-          scan_number: checkIn.scan_number,
-        };
-      });
-
-      setAnalytics({
-        party,
-        viewStats: {
-          totalViews,
-          followerViews,
-          platformViews,
-          followerPercent,
-          platformPercent,
-        },
-        ticketStats: {
-          totalCapacity,
-          totalSold,
-          totalRevenue,
-          totalCheckedIn,
-          checkInRate,
-        },
-        tierStats,
-        attendees,
-        checkInTimeline,
-        recentCheckIns,
-      });
-    } catch (error) {
-      console.error("Error fetching analytics:", error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+    const { data: viewStatsData, error: viewStatsError } = await supabase.rpc("get_party_view_stats", { p_party_id: partyId, p_host_id: party.host_id });
+    let totalViews = 0, followerViews = 0, platformViews = 0;
+    if (!viewStatsError && viewStatsData) {
+      totalViews = viewStatsData.total_views || 0;
+      followerViews = viewStatsData.follower_views || 0;
+      platformViews = viewStatsData.platform_views || 0;
     }
+
+    const recentCheckIns = (checkIns || []).slice(0, 10).map((ci) => {
+      const ticket = tickets?.find((t) => t.id === ci.ticket_id);
+      return {
+        id: ci.id,
+        buyer_name: (ticket?.profiles as any)?.full_name || (ticket?.profiles as any)?.username ||
+          (ticket as any)?.guest_name || (ticket as any)?.guest_email || "Unknown",
+        buyer_avatar: (ticket?.profiles as any)?.avatar_url || null,
+        checked_in_at: ci.checked_in_at, scan_number: ci.scan_number,
+      };
+    });
+
+    return {
+      party,
+      viewStats: { totalViews, followerViews, platformViews,
+        followerPercent: totalViews > 0 ? (followerViews / totalViews) * 100 : 0,
+        platformPercent: totalViews > 0 ? (platformViews / totalViews) * 100 : 0 },
+      ticketStats: { totalCapacity, totalSold, totalRevenue, totalCheckedIn, checkInRate },
+      tierStats, attendees, checkInTimeline, recentCheckIns,
+    };
   };
 
-  const handleRefresh = () => {
-    setRefreshing(true);
-    fetchAnalytics();
-  };
+  // ---------------------------------------------------------------------------
+  // useQuery — 30s staleTime so check-in counts stay relatively fresh
+  // ---------------------------------------------------------------------------
+  const { data: analytics, isLoading: loading, isRefetching: refreshing, refetch } = useQuery({
+    queryKey: queryKeys.partyAnalytics(partyId),
+    queryFn: fetchAnalytics,
+    enabled: !!partyId && !!user,
+    staleTime: 30 * 1000,
+  });
+
+  const handleRefresh = () => { refetch(); };
 
   const exportGuestList = async () => {
     if (!analytics || analytics.attendees.length === 0) {

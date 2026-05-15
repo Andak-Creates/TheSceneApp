@@ -43,9 +43,12 @@ interface HostVerification {
   id_type: string | null;
   id_number: string | null;
   id_image_url: string | null;
+  selfie_image_url: string | null;
   address: string | null;
   phone: string | null;
   status: string;
+  api_status?: string;
+  api_verification_results?: any;
   created_at: string;
   profile: {
     username: string;
@@ -231,9 +234,29 @@ export default function AdminConsole() {
     }
   };
 
-  const handleVerificationReview = async (verificationId: string, userId: string, approved: boolean, rejectionReason?: string) => {
+  const handleVerificationReview = async (verificationId: string, userId: string, approved: boolean, rejectionReason?: string, isApiCheck: boolean = false) => {
     setProcessingVerificationId(verificationId);
     try {
+      if (isApiCheck) {
+        // Trigger the Edge Function for authenticity check
+        const { data: { session } } = await supabase.auth.getSession();
+        const { data, error } = await supabase.functions.invoke("verify-host-id", {
+          body: { verification_id: verificationId },
+          headers: session?.access_token 
+            ? { Authorization: `Bearer ${session.access_token}` } 
+            : undefined,
+        });
+
+        if (error) throw error;
+        
+        Alert.alert(
+          data.status === "success" ? "Verification Successful" : "Verification Warning",
+          data.summary || "ID checked against government records."
+        );
+        fetchVerifications();
+        return;
+      }
+
       const { error: verError } = await supabase
         .from("host_verifications")
         .update({
@@ -270,9 +293,9 @@ export default function AdminConsole() {
 
       Alert.alert("Success", approved ? "Host verification approved. They can now create parties." : "Host verification rejected.");
       fetchVerifications();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Verification review error:", err);
-      Alert.alert("Error", "Failed to update verification.");
+      Alert.alert("Error", err.message || "Failed to update verification.");
     } finally {
       setProcessingVerificationId(null);
     }
@@ -355,11 +378,11 @@ export default function AdminConsole() {
             {/* Status badge */}
             <View className={`px-3 py-1 rounded-full ${
               item.status === 'pending' ? 'bg-orange-500/20' :
-              item.status === 'completed' ? 'bg-green-500/20' : 'bg-red-500/20'
+              (item.status === 'completed' || item.status === 'approved') ? 'bg-green-500/20' : 'bg-red-500/20'
             }`}>
               <Text className={`text-xs font-bold capitalize ${
                 item.status === 'pending' ? 'text-orange-500' :
-                item.status === 'completed' ? 'text-green-500' : 'text-red-500'
+                (item.status === 'completed' || item.status === 'approved') ? 'text-green-500' : 'text-red-500'
               }`}>
                 {item.status}
               </Text>
@@ -461,43 +484,100 @@ export default function AdminConsole() {
         <Text className="text-white text-sm mb-2">{item.address || "—"}</Text>
         <Text className="text-purple-400 text-xs font-bold uppercase mb-1">Phone</Text>
         <Text className="text-white text-sm mb-2">{item.phone || "—"}</Text>
-        {item.id_image_url && (() => {
-          const { data } = supabase.storage.from("flyers").getPublicUrl(item.id_image_url);
-          return (
-            <>
-              <Text className="text-purple-400 text-xs font-bold uppercase mb-2">ID Photo</Text>
-              <ExpoImage source={{ uri: data.publicUrl }} className="w-full h-32 rounded-lg" contentFit="cover" />
-            </>
-          );
-        })()}
+        <View className="flex-row gap-2 mb-4">
+          {item.id_image_url && (() => {
+            const { data } = supabase.storage.from("flyers").getPublicUrl(item.id_image_url);
+            return (
+              <View className="flex-1">
+                <Text className="text-purple-400 text-[10px] font-bold uppercase mb-1">ID Photo</Text>
+                <ExpoImage source={{ uri: data.publicUrl }} className="w-full h-24 rounded-lg" contentFit="cover" />
+              </View>
+            );
+          })()}
+          {item.selfie_image_url && (() => {
+            const { data } = supabase.storage.from("flyers").getPublicUrl(item.selfie_image_url);
+            return (
+              <View className="flex-1">
+                <Text className="text-purple-400 text-[10px] font-bold uppercase mb-1">Selfie</Text>
+                <ExpoImage source={{ uri: data.publicUrl }} className="w-full h-24 rounded-lg" contentFit="cover" />
+              </View>
+            );
+          })()}
+        </View>
+
+        {/* API Verification Status */}
+        {item.api_status && item.api_status !== "not_checked" && (
+          <View className={`mt-3 p-3 rounded-xl border ${
+            item.api_status === "success" ? "bg-green-500/10 border-green-500/30" :
+            item.api_status === "suspicious" ? "bg-red-500/10 border-red-500/30" :
+            "bg-white/5 border-white/10"
+          }`}>
+            <View className="flex-row items-center gap-2 mb-1">
+              <Ionicons 
+                name={item.api_status === "success" ? "shield-checkmark" : "shield-alert"} 
+                size={16} 
+                color={item.api_status === "success" ? "#22c55e" : "#ef4444"} 
+              />
+              <Text className={`font-bold text-xs uppercase ${
+                item.api_status === "success" ? "text-green-400" : "text-red-400"
+              }`}>
+                Authenticity: {item.api_status}
+              </Text>
+            </View>
+            {item.api_verification_results?.summary && (
+              <Text className="text-gray-400 text-[10px] leading-tight">
+                {item.api_verification_results.summary}
+              </Text>
+            )}
+          </View>
+        )}
       </View>
       {item.status === "pending" && (
-        <View className="flex-row gap-3">
+        <View className="flex-col gap-3">
+          {/* Authenticity Check Button */}
           <TouchableOpacity
             onPress={() => Alert.alert(
-              "Reject Verification",
-              "Optionally enter a reason (shown to the user):",
+              "Authenticity Check",
+              "This will verify the submitted ID against government databases via Smile ID. (MOCK MODE ENABLED)",
               [
                 { text: "Cancel", style: "cancel" },
-                { text: "Reject", style: "destructive", onPress: () => handleVerificationReview(item.id, item.user_id, false) },
+                { text: "Verify Now", onPress: () => handleVerificationReview(item.id, item.user_id, true, undefined, true) }
               ]
             )}
             disabled={!!processingVerificationId}
-            className="flex-1 bg-red-500/10 py-3 rounded-xl items-center"
+            className="w-full bg-purple-600/20 border border-purple-600/30 py-3 rounded-xl items-center flex-row justify-center gap-2"
           >
-            <Text className="text-red-500 font-bold">Reject</Text>
+            <Ionicons name="finger-print" size={18} color="#a855f7" />
+            <Text className="text-purple-400 font-bold">Check Identity Authenticity</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => handleVerificationReview(item.id, item.user_id, true)}
-            disabled={!!processingVerificationId}
-            className="flex-1 bg-green-500 py-3 rounded-xl items-center"
-          >
-            {processingVerificationId === item.id ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <Text className="text-white font-bold">Approve</Text>
-            )}
-          </TouchableOpacity>
+
+          <View className="flex-row gap-3">
+            <TouchableOpacity
+              onPress={() => Alert.alert(
+                "Reject Verification",
+                "Optionally enter a reason (shown to the user):",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  { text: "Reject", style: "destructive", onPress: () => handleVerificationReview(item.id, item.user_id, false) },
+                ]
+              )}
+              disabled={!!processingVerificationId}
+              className="flex-1 bg-red-500/10 py-3 rounded-xl items-center"
+            >
+              <Text className="text-red-500 font-bold">Reject</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => handleVerificationReview(item.id, item.user_id, true)}
+              disabled={!!processingVerificationId}
+              className="flex-1 bg-green-500 py-3 rounded-xl items-center"
+            >
+              {processingVerificationId === item.id ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text className="text-white font-bold">Approve</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       )}
     </View>

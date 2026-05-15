@@ -1,6 +1,7 @@
 import { Session, User } from "@supabase/supabase-js";
 import { create } from "zustand";
 import { supabase } from "../lib/supabase";
+import { getFriendlyErrorMessage } from "../lib/error-utils";
 
 interface AuthState {
   session: Session | null;
@@ -56,6 +57,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   signUp: async (email: string, password: string, username: string, referredBy?: string) => {
     try {
+      const formattedUsername = username.toLowerCase().replace(/\s+/g, '-');
+
+      // Check if username already exists to provide a friendly error message
+      const { data: existingUser } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("username", formattedUsername)
+        .maybeSingle();
+
+      if (existingUser) {
+        return { error: new Error("Username already in use. Please choose another one.") };
+      }
+
       // Sign up user with metadata
       const { data, error } = await supabase.auth.signUp({
         email,
@@ -63,14 +77,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         options: {
           emailRedirectTo: "https://thesceneapp.online/email-confirmed",
           data: {
-            username: username.toLowerCase(),
-            full_name: username,
+            username: formattedUsername,
+            full_name: username.trim(),
             referred_by: referredBy || null,
           },
         },
       });
 
-      if (error) return { error };
+      if (error) return { error: { ...error, message: getFriendlyErrorMessage(error) } };
       if (!data.user) return { error: new Error("No user returned") };
 
       // NOTE: Do NOT write to user_preferences here.
@@ -90,7 +104,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         password,
       });
 
-      if (error) return { error };
+      if (error) return { error: { ...error, message: getFriendlyErrorMessage(error) } };
 
       // NOTE: Do NOT overwrite user location/currency on every sign-in.
       // This would silently clobber preferences the user set during onboarding.

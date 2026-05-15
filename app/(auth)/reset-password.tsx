@@ -1,5 +1,6 @@
+import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import * as Linking from "expo-linking";
 import { useEffect, useState } from "react";
 import {
@@ -15,12 +16,15 @@ import {
   View,
 } from "react-native";
 import { supabase } from "../../lib/supabase";
+import { getFriendlyErrorMessage } from "../../lib/error-utils";
 
 export default function ResetPasswordScreen() {
   const router = useRouter();
   const url = Linking.useURL();
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
@@ -33,7 +37,16 @@ export default function ResetPasswordScreen() {
         let access_token = null;
         let refresh_token = null;
 
-        // Check hash
+        // 1. Check for Supabase error redirects first
+        const parsed = Linking.parse(url);
+        if (parsed.queryParams?.error_description) {
+          setError(
+            (parsed.queryParams.error_description as string).replace(/\+/g, ' ')
+          );
+          return;
+        }
+
+        // 2. Check hash for implicit flow tokens
         const hashPart = url.split('#')[1];
         if (hashPart) {
           const params = new URLSearchParams(hashPart);
@@ -41,16 +54,15 @@ export default function ResetPasswordScreen() {
           refresh_token = params.get('refresh_token');
         }
 
-        // Try query params if PKCE
+        // 3. Try query params if PKCE
         if (!access_token || !refresh_token) {
-          const parsed = Linking.parse(url);
           if (parsed.queryParams?.access_token && parsed.queryParams?.refresh_token) {
              access_token = parsed.queryParams.access_token as string;
              refresh_token = parsed.queryParams.refresh_token as string;
           } else if (parsed.queryParams?.code) {
              const { error: pkceError } = await supabase.auth.exchangeCodeForSession(parsed.queryParams.code as string);
              if (pkceError) {
-               setError("Invalid or expired reset link.");
+               setError(getFriendlyErrorMessage(pkceError) || "Invalid or expired reset link. Please request a new one.");
              }
              return; // handled by PKCE
           }
@@ -62,7 +74,7 @@ export default function ResetPasswordScreen() {
             refresh_token
           });
           if (sessionError) {
-            setError("Session expired or invalid link. Please try again.");
+            setError(getFriendlyErrorMessage(sessionError) || "Session expired or invalid link. Please try again.");
           }
         }
       }
@@ -104,7 +116,7 @@ export default function ResetPasswordScreen() {
         router.replace("/(app)/feed");
       }, 2000);
     } catch (err: any) {
-      setError(err.message || "Failed to update password. Please try again.");
+      setError(getFriendlyErrorMessage(err) || "Failed to update password. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -169,26 +181,52 @@ export default function ResetPasswordScreen() {
 
                 <View className="mb-4">
                   <Text className="text-gray-400 text-sm font-medium mb-2 ml-1">New Password</Text>
-                  <TextInput
-                    className="bg-white/10 border border-white/20 rounded-xl h-14 px-5 text-white text-base"
-                    placeholder="Enter new password"
-                    placeholderTextColor="#888"
-                    value={password}
-                    onChangeText={setPassword}
-                    secureTextEntry
-                  />
+                  <View className="relative">
+                    <TextInput
+                      className="bg-white/10 border border-white/20 rounded-xl h-14 px-5 pr-14 text-white text-base"
+                      placeholder="Enter new password"
+                      placeholderTextColor="#888"
+                      value={password}
+                      onChangeText={setPassword}
+                      secureTextEntry={!showPassword}
+                    />
+                    <TouchableOpacity
+                      onPress={() => setShowPassword((v) => !v)}
+                      className="absolute right-4 top-0 bottom-0 justify-center"
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Ionicons
+                        name={showPassword ? "eye-off-outline" : "eye-outline"}
+                        size={22}
+                        color="#888"
+                      />
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 <View className="mb-6">
                   <Text className="text-gray-400 text-sm font-medium mb-2 ml-1">Confirm Password</Text>
-                  <TextInput
-                    className="bg-white/10 border border-white/20 rounded-xl h-14 px-5 text-white text-base"
-                    placeholder="Confirm new password"
-                    placeholderTextColor="#888"
-                    value={confirmPassword}
-                    onChangeText={setConfirmPassword}
-                    secureTextEntry
-                  />
+                  <View className="relative">
+                    <TextInput
+                      className="bg-white/10 border border-white/20 rounded-xl h-14 px-5 pr-14 text-white text-base"
+                      placeholder="Confirm new password"
+                      placeholderTextColor="#888"
+                      value={confirmPassword}
+                      onChangeText={setConfirmPassword}
+                      secureTextEntry={!showConfirmPassword}
+                    />
+                    <TouchableOpacity
+                      onPress={() => setShowConfirmPassword((v) => !v)}
+                      className="absolute right-4 top-0 bottom-0 justify-center"
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Ionicons
+                        name={showConfirmPassword ? "eye-off-outline" : "eye-outline"}
+                        size={22}
+                        color="#888"
+                      />
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 <TouchableOpacity

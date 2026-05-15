@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
@@ -10,6 +11,16 @@ import { useAuthStore } from "../stores/authStore";
 import { usePreferencesStore } from "../stores/preferencesStore";
 import { useUserStore } from "../stores/userStore";
 import * as Sentry from '@sentry/react-native';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000,   // 5 min — treat data as fresh
+      gcTime: 10 * 60 * 1000,     // 10 min — keep unused cache
+      retry: 1,
+    },
+  },
+});
 
 Sentry.init({
   dsn: 'https://39e0484f1524507ed786ed803b34071c@o4511057460723712.ingest.de.sentry.io/4511057467342928',
@@ -72,6 +83,7 @@ export default Sentry.wrap(function RootLayout() {
   const isLoading = !initialized || (user && hasPreferences === null);
 
   return (
+    <QueryClientProvider client={queryClient}>
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <PaystackProvider publicKey={PAYSTACK_PUBLIC_KEY}>
@@ -103,5 +115,6 @@ export default Sentry.wrap(function RootLayout() {
         </PaystackProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
+    </QueryClientProvider>
   );
 });

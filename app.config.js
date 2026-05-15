@@ -4,7 +4,7 @@ export default {
   expo: {
     name: IS_DEV ? "TheScene (Dev)" : "TheScene",
     slug: "TheScene",
-    version: "1.0.2",
+    version: "1.0.4",
     orientation: "portrait",
     icon: "./assets/images/thescene-logo.png",
     scheme: "thescene",
@@ -17,7 +17,8 @@ export default {
         : "com.vindi.thescene",
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
-        NSPhotoLibraryUsageDescription: "TheScene needs access to your photo library so you can choose a profile picture or share photos and videos from parties you attend.",
+        NSPhotoLibraryUsageDescription:
+          "TheScene needs access to your photo library so you can choose a profile picture or share photos and videos from parties you attend.",
       },
     },
     android: {
@@ -34,6 +35,7 @@ export default {
       ],
     },
     web: {
+      favicon: "./assets/images/thescene-logo.png",
       output: "static",
     },
     plugins: [
@@ -83,10 +85,10 @@ export default {
       },
     },
     updates: {
-      url: "https://u.expo.dev/1a11e3b7-a90c-4fe3-9a4a-9c73ae26aa22"
+      url: "https://u.expo.dev/1a11e3b7-a90c-4fe3-9a4a-9c73ae26aa22",
     },
     runtimeVersion: {
-      policy: "appVersion"
-    }
+      policy: "appVersion",
+    },
   },
 };

@@ -1,9 +1,10 @@
 import AttendancePill from "@/components/AttendancePill";
 import { useAudioStore } from "@/stores/audioStore";
-import { useFeedStore, FeedParty } from "@/stores/feedStore";
+import { FeedParty } from "@/stores/feedStore";
+import { useFeedQuery } from "@/hooks/useFeedQuery";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useFocusEffect } from "expo-router";
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useRef, useState, useCallback } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -20,6 +21,7 @@ import { getCurrencySymbol } from "../../lib/currency";
 import { supabase } from "../../lib/supabase";
 import { shareParty } from "../../lib/share";
 import { useAuthStore } from "../../stores/authStore";
+import { getOptimizedUrl } from "../../lib/cloudinary";
 
 const PartyCard = React.memo(({ 
   party, 
@@ -163,7 +165,7 @@ const PartyCard = React.memo(({
       >
         {party.host_profile?.avatar_url ? (
           <Image
-            source={{ uri: party.host_profile.avatar_url }}
+            source={{ uri: getOptimizedUrl(party.host_profile.avatar_url, "image") }}
             style={{ width: 40, height: 40, borderRadius: 48 }}
             contentFit="cover"
             transition={200}
@@ -203,7 +205,7 @@ const PartyCard = React.memo(({
           ) : party.flyer_url ? (
             <TouchableOpacity activeOpacity={0.9} onPress={() => router.push({ pathname: "/party/[id]", params: { id: party.id } })}>
               <Image
-                source={{ uri: party.flyer_url }}
+                source={{ uri: getOptimizedUrl(party.flyer_url, "image") }}
                 style={{ width: "100%", aspectRatio: 4 / 5 }}
                 contentFit="cover"
                 transition={300}
@@ -292,9 +294,13 @@ export default function FeedScreen() {
     isLoading,
     isRefreshing,
     hasMore,
-    fetchParties,
+    fetchNextPage,
+    refetch,
+    isFetchingNextPage,
     updateParty,
-  } = useFeedStore();
+  } = useFeedQuery(user?.id);
+
+  // No manual useEffect needed — useInfiniteQuery fetches automatically on mount
 
   const [activePartyId, setActivePartyId] = useState<string | null>(null);
 
@@ -303,21 +309,15 @@ export default function FeedScreen() {
     if (viewableItems.length > 0) setActivePartyId(viewableItems[0].item.id);
   }).current;
 
-  useEffect(() => {
-    if (user?.id) {
-      fetchParties(user.id);
-    }
-  }, [user?.id]);
-
   const handleRefresh = useCallback(() => {
-    if (user?.id) fetchParties(user.id, true);
-  }, [user?.id]);
+    refetch();
+  }, [refetch]);
 
   const handleLoadMore = useCallback(() => {
-    if (!isLoading && hasMore && user?.id) {
-      fetchParties(user.id);
+    if (!isFetchingNextPage && hasMore) {
+      fetchNextPage();
     }
-  }, [isLoading, hasMore, user?.id]);
+  }, [isFetchingNextPage, hasMore, fetchNextPage]);
 
   const renderItem = useCallback(({ item }: { item: FeedParty }) => {
     return (
@@ -374,7 +374,7 @@ export default function FeedScreen() {
         onEndReached={handleLoadMore}
         onEndReachedThreshold={0.5}
         refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor="#a855f7" />}
-        ListFooterComponent={isLoading && parties.length > 0 ? <ActivityIndicator className="my-8" color="#a855f7" /> : null}
+        ListFooterComponent={isFetchingNextPage ? <ActivityIndicator className="my-8" color="#a855f7" /> : null}
         ListEmptyComponent={
           <View className="items-center justify-center py-32">
             <View className="w-20 h-20 rounded-full bg-[#150d1e] items-center justify-center mb-6 border border-white/5">

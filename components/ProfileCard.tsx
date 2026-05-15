@@ -125,7 +125,7 @@ export default function ProfileCard({ profile }: ProfileCardProps) {
       {profile.avatar_url ? (
         <Image
           source={{ uri: profile.avatar_url }}
-          className="w-12 h-12 rounded-full"
+          style={{ width: 48, height: 48, borderRadius: 24 }}
           contentFit="cover"
         />
       ) : (
@@ -154,7 +154,7 @@ export default function ProfileCard({ profile }: ProfileCardProps) {
             </View>
           )}
           <Text className="text-gray-400 text-xs flex-1" numberOfLines={1}>
-            @{profile.username}
+            @{profile.username.toLowerCase().replace(/\s+/g, '-')}
           </Text>
         </View>
       </View>

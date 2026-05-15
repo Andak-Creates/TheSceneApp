@@ -14,6 +14,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { notifyAdmins } from "../../lib/adminNotifications";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "../../stores/authStore";
 import { useUserStore } from "../../stores/userStore";
@@ -36,7 +37,6 @@ export default function HostVerificationScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [fullName, setFullName] = useState("");
   const [idType, setIdType] = useState("");
-  const [idNumber, setIdNumber] = useState("");
   const [idImageUri, setIdImageUri] = useState<string | null>(null);
   const [address, setAddress] = useState("");
   const [phone, setPhone] = useState("");
@@ -87,7 +87,6 @@ export default function HostVerificationScreen() {
         setStatus(verificationData.status as VerificationStatus);
         setFullName(verificationData.full_name || profile?.full_name || "");
         setIdType(verificationData.id_type || "");
-        setIdNumber(verificationData.id_number || "");
         setIdImageUri(verificationData.id_image_url || null);
         setAddress(verificationData.address || "");
         setPhone(verificationData.phone || "");
@@ -122,7 +121,7 @@ export default function HostVerificationScreen() {
     }
   };
 
-  const uploadIdImage = async (uri: string): Promise<string> => {
+  const uploadVerificationImage = async (uri: string, prefix: string): Promise<string> => {
     if (!user) throw new Error("Not authenticated");
 
     const response = await fetch(uri);
@@ -132,7 +131,7 @@ export default function HostVerificationScreen() {
     const fileExt = uri.split(".").pop()?.toLowerCase() || "jpg";
     const contentType = fileExt === "png" ? "image/png" : "image/jpeg";
 
-    const fileName = `verification/${user.id}/id_${Date.now()}.${fileExt}`;
+    const fileName = `verification/${user.id}/${prefix}_${Date.now()}.${fileExt}`;
 
     const { data, error } = await supabase.storage
       .from("flyers")
@@ -154,18 +153,22 @@ export default function HostVerificationScreen() {
     if (
       !fullName.trim() ||
       !idType.trim() ||
-      !idNumber.trim() ||
       !idImageUri ||
       !address.trim() ||
       !phone.trim()
     ) {
-      setError("Please fill in all fields and upload your ID image.");
+      setError("Please fill in all fields and upload your ID");
       return;
     }
     setSubmitting(true);
     setError("");
     try {
-      const idImageUrl = await uploadIdImage(idImageUri);
+      // 1. Upload ID Image
+      const idImageUrl = idImageUri.startsWith('http') 
+        ? idImageUri 
+        : await uploadVerificationImage(idImageUri, "id");
+    
+
       const { error: upsertError } = await supabase
         .from("host_verifications")
         .upsert(
@@ -173,7 +176,6 @@ export default function HostVerificationScreen() {
             user_id: user.id,
             full_name: fullName.trim(),
             id_type: idType.trim(),
-            id_number: idNumber.trim(),
             id_image_url: idImageUrl,
             address: address.trim(),
             phone: phone.trim(),
@@ -198,6 +200,14 @@ export default function HostVerificationScreen() {
       }
 
       setStatus("pending");
+      
+      // Notify Admins (Push)
+      notifyAdmins(
+        "🛡️ New Host Verification",
+        `A new host verification has been submitted by ${fullName.trim()}.`,
+        { type: "verification", user_id: user.id }
+      );
+
       Alert.alert(
         "Submitted",
         "Your verification has been submitted. We'll review it and notify you. You can create parties once approved.",
@@ -311,6 +321,7 @@ export default function HostVerificationScreen() {
                   "Passport",
                   "Driver's License",
                   "Voter's Card",
+                  "NIN",
                 ].map((type) => (
                   <TouchableOpacity
                     key={type}
@@ -332,16 +343,7 @@ export default function HostVerificationScreen() {
                 ))}
               </View>
             </View>
-            <View className="mb-4">
-              <Text className="text-white font-semibold mb-2">ID number *</Text>
-              <TextInput
-                className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white"
-                placeholder="ID document number"
-                placeholderTextColor="#666"
-                value={idNumber}
-                onChangeText={setIdNumber}
-              />
-            </View>
+
             <View className="mb-4">
               <Text className="text-white font-semibold mb-2">ID photo *</Text>
               <TouchableOpacity
@@ -350,12 +352,12 @@ export default function HostVerificationScreen() {
               >
                 {idImageUri ? (
                   <Image
-                    source={{ uri: idImageUri }}
+                    source={{ uri: idImageUri.startsWith('http') ? supabase.storage.from('flyers').getPublicUrl(idImageUri).data.publicUrl : idImageUri }}
                     className="w-full h-32 rounded-lg"
                   />
                 ) : (
                   <>
-                    <Ionicons name="camera-outline" size={40} color="#666" />
+                    <Ionicons name="card-outline" size={40} color="#666" />
                     <Text className="text-gray-400 mt-2">
                       Tap to upload ID photo
                     </Text>
@@ -363,6 +365,7 @@ export default function HostVerificationScreen() {
                 )}
               </TouchableOpacity>
             </View>
+
             <View className="mb-4">
               <Text className="text-white font-semibold mb-2">Address *</Text>
               <TextInput

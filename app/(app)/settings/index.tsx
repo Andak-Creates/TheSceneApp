@@ -9,10 +9,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import HostProfileSelector from "../../../components/HostProfileSelector";
 import { supabase } from "../../../lib/supabase";
 import { useAuthStore } from "../../../stores/authStore";
 import { useUserStore } from "../../../stores/userStore";
-import HostProfileSelector from "../../../components/HostProfileSelector";
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -104,11 +104,11 @@ export default function SettingsScreen() {
                               user_id: user.id,
                               username: profile?.username,
                               deletion_date: new Date(
-                                Date.now() + 5 * 24 * 60 * 60 * 1000
+                                Date.now() + 5 * 24 * 60 * 60 * 1000,
                               ).toISOString(),
                             },
                             is_read: false,
-                          }))
+                          })),
                         );
                       }
 
@@ -118,24 +118,25 @@ export default function SettingsScreen() {
 
                       Alert.alert(
                         "Deletion Scheduled",
-                        "Your account has been scheduled for deletion in 5 days. Contact support@thescene.app if you change your mind."
+                        "Your account has been scheduled for deletion in 5 days. Contact support@thescene.app if you change your mind.",
                       );
                     } catch (err: any) {
                       console.error("Delete account error:", err);
                       Alert.alert(
                         "Error",
-                        err.message || "Failed to request deletion. Please try again."
+                        err.message ||
+                          "Failed to request deletion. Please try again.",
                       );
                     } finally {
                       setSigningOut(false);
                     }
                   },
                 },
-              ]
+              ],
             );
           },
         },
-      ]
+      ],
     );
   };
 
@@ -249,7 +250,7 @@ export default function SettingsScreen() {
                     if (!data || data.length === 0) {
                       Alert.alert(
                         "No Profile",
-                        "Please create a host profile first to manage admins."
+                        "Please create a host profile first to manage admins.",
                       );
                     } else if (data.length === 1) {
                       router.push({
@@ -297,7 +298,9 @@ export default function SettingsScreen() {
             <SettingItem
               icon="shield-outline"
               label="Blocked Users"
-              onPress={() => router.push("/(app)/settings/blocked-users" as any)}
+              onPress={() =>
+                router.push("/(app)/settings/blocked-users" as any)
+              }
             />
           </View>
         </View>

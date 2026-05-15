@@ -11,6 +11,7 @@ import {
     View,
 } from "react-native";
 import { pickImages, pickVideo } from "../lib/media";
+import { getOptimizedUrl } from "../lib/cloudinary";
 
 interface MediaItem {
   uri: string;
@@ -159,7 +160,7 @@ export default function MediaGalleryUploader({
           {media.map((item, index) => (
             <View key={index} className="mr-3 relative">
               <Image
-                source={{ uri: item.thumbnailUri || item.uri }}
+                source={{ uri: getOptimizedUrl(item.thumbnailUri || item.uri, item.type) }}
                 className="w-32 h-32 rounded-xl"
               />
 

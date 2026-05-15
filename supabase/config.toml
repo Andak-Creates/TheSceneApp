@@ -9,6 +9,13 @@ verify_jwt = false
 
 [functions.send-push-notification]
 verify_jwt = false
+
+[functions.send-ticket-email]
+verify_jwt = false
+
+[functions.create-guest-ticket]
+verify_jwt = false
+
 [functions.cleanup-storage]
 enabled = true
 verify_jwt = true

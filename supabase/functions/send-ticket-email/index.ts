@@ -1,6 +1,6 @@
 // supabase/functions/send-ticket-email/index.ts
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
-const SITE_URL = Deno.env.get("SITE_URL") ?? "https://thescenehq.com";
+const SITE_URL = Deno.env.get("SITE_URL") ?? "https://thesceneapp.online";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -220,6 +220,16 @@ function buildEmailHtml(payload: TicketEmailPayload): string {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
+  }
+
+  const authHeader = req.headers.get("Authorization");
+  const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  
+  if (!authHeader || authHeader !== `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`) {
+    return new Response(
+      JSON.stringify({ error: "Forbidden: Internal only" }),
+      { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   }
 
   try {

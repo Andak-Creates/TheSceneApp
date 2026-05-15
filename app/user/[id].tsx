@@ -1,7 +1,6 @@
 // app/user/[id].tsx
 import { sendPush } from "@/lib/sendPush";
 import { Ionicons } from "@expo/vector-icons";
-import { Image as ExpoImage } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
@@ -123,29 +122,47 @@ export default function UserProfileScreen() {
       const [repostsRes, ticketsRes] = await Promise.all([
         supabase
           .from("party_reposts")
-          .select(`party:parties(id, title, flyer_url, date, city, ticket_price, currency_code, date_tba, party_media(thumbnail_url, media_type, is_primary))`)
+          .select(
+            `party:parties(id, title, flyer_url, date, city, ticket_price, currency_code, date_tba, party_media(thumbnail_url, media_type, is_primary))`,
+          )
           .eq("user_id", id)
           .order("created_at", { ascending: false }),
         supabase
           .from("tickets")
-          .select(`party:parties(id, title, flyer_url, date, city, ticket_price, currency_code, date_tba, party_media(thumbnail_url, media_type, is_primary))`)
+          .select(
+            `party:parties(id, title, flyer_url, date, city, ticket_price, currency_code, date_tba, party_media(thumbnail_url, media_type, is_primary))`,
+          )
           .eq("user_id", id)
           .eq("payment_status", "completed"),
       ]);
 
       const extractThumb = (p: any): Party => {
         const mediaRows: any[] = p.party_media || [];
-        const primaryMedia = mediaRows.find((m: any) => m.is_primary) || mediaRows[0];
+        const primaryMedia =
+          mediaRows.find((m: any) => m.is_primary) || mediaRows[0];
         return {
           ...p,
-          thumbnail_url: primaryMedia?.media_type === "video" ? primaryMedia?.thumbnail_url ?? null : null,
+          thumbnail_url:
+            primaryMedia?.media_type === "video"
+              ? (primaryMedia?.thumbnail_url ?? null)
+              : null,
         };
       };
 
-      const reposts: Party[] = (repostsRes.data || []).map((r: any) => r.party).filter(Boolean).map(extractThumb);
-      const tickets: Party[] = (ticketsRes.data || []).map((t: any) => t.party).filter(Boolean).map(extractThumb);
-      const upcoming = tickets.filter((p) => p.date_tba || !p.date || new Date(p.date) >= now);
-      const past = tickets.filter((p) => !p.date_tba && !!p.date && new Date(p.date) < now);
+      const reposts: Party[] = (repostsRes.data || [])
+        .map((r: any) => r.party)
+        .filter(Boolean)
+        .map(extractThumb);
+      const tickets: Party[] = (ticketsRes.data || [])
+        .map((t: any) => t.party)
+        .filter(Boolean)
+        .map(extractThumb);
+      const upcoming = tickets.filter(
+        (p) => p.date_tba || !p.date || new Date(p.date) >= now,
+      );
+      const past = tickets.filter(
+        (p) => !p.date_tba && !!p.date && new Date(p.date) < now,
+      );
 
       // Fetch view counts in one batch for all unique party ids
       const allParties = [...reposts, ...tickets];
@@ -154,15 +171,16 @@ export default function UserProfileScreen() {
       let viewsMap: Record<string, number> = {};
       if (allIds.length > 0) {
         const { data: viewRows } = await supabase
-          .from("party_views")
-          .select("party_id")
+          .from("party_view_counts")
+          .select("party_id, view_count")
           .in("party_id", allIds);
         for (const row of viewRows || []) {
-          viewsMap[row.party_id] = (viewsMap[row.party_id] || 0) + 1;
+          viewsMap[row.party_id] = Number(row.view_count) || 0;
         }
       }
 
-      const addViews = (arr: Party[]) => arr.map((p) => ({ ...p, views_count: viewsMap[p.id] || 0 }));
+      const addViews = (arr: Party[]) =>
+        arr.map((p) => ({ ...p, views_count: viewsMap[p.id] || 0 }));
 
       setRepostedParties(addViews(reposts));
       setUpcomingParties(addViews(upcoming));
@@ -217,7 +235,7 @@ export default function UserProfileScreen() {
           id as string,
           "👤 New follower",
           `${followerProfile?.username || "Someone"} started following you`,
-          { type: "new_follower", follower_id: user.id }
+          { type: "new_follower", follower_id: user.id },
         );
       }
     } catch (error) {
@@ -231,7 +249,6 @@ export default function UserProfileScreen() {
       setFollowLoading(false);
     }
   };
-
 
   const renderPartyCard = ({ item }: { item: Party }) => (
     <View className="mr-3" style={{ width: 165 }}>
@@ -247,9 +264,12 @@ export default function UserProfileScreen() {
 
   const getActiveList = (): Party[] => {
     switch (activeTab) {
-      case "reposts": return repostedParties;
-      case "upcoming": return upcomingParties;
-      case "past": return pastParties;
+      case "reposts":
+        return repostedParties;
+      case "upcoming":
+        return upcomingParties;
+      case "past":
+        return pastParties;
     }
   };
 
@@ -276,7 +296,7 @@ export default function UserProfileScreen() {
       className="flex-1 bg-[#191022]"
       showsVerticalScrollIndicator={false}
     >
-      <View className="pt-12 px-6">
+      <View className="pt-12 mt-6 px-6">
         {/* Back */}
         <TouchableOpacity
           onPress={() => router.back()}
@@ -290,7 +310,12 @@ export default function UserProfileScreen() {
           {profile.avatar_url ? (
             <Image
               source={{ uri: profile.avatar_url }}
-              style={{ width: 96, height: 96, borderRadius: 48, marginBottom: 16 }}
+              style={{
+                width: 96,
+                height: 96,
+                borderRadius: 48,
+                marginBottom: 16,
+              }}
               resizeMode="cover"
             />
           ) : (
@@ -305,7 +330,7 @@ export default function UserProfileScreen() {
             {profile.full_name || profile.username}
           </Text>
           <Text className="text-gray-400 text-base mb-3">
-            @{profile.username}
+            @{profile.username.toLowerCase().replace(/\s+/g, "-")}
           </Text>
 
           {profile.bio && (

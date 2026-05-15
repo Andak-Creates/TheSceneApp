@@ -32,7 +32,7 @@ export async function shortenUrl(url: string): Promise<string> {
  * Opens the native share sheet for a party.
  */
 export async function shareParty(partyId: string, partyTitle: string) {
-  const fullUrl = `https://thescene.vercel.app/party/${partyId}`;
+  const fullUrl = `https://thesceneapp.online/party/${partyId}`;
   
   // Show the share sheet immediately with the full URL as a placeholder
   // or wait for the short URL. Given its a better UX, we'll try to shorten first.

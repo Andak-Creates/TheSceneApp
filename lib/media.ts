@@ -4,6 +4,8 @@ import * as ImagePicker from "expo-image-picker";
 import * as VideoThumbnails from "expo-video-thumbnails";
 import { supabase } from "./supabase";
 
+import { uploadToCloudinary } from "./cloudinary";
+
 export interface MediaUploadResult {
   url: string;
   thumbnailUrl?: string;
@@ -11,7 +13,7 @@ export interface MediaUploadResult {
 }
 
 /**
- * Upload party media (image or video) to Supabase storage
+ * Upload party media (image or video) to Cloudinary
  */
 export async function uploadPartyMedia(
   partyId: string,
@@ -19,73 +21,13 @@ export async function uploadPartyMedia(
   type: "image" | "video",
 ): Promise<MediaUploadResult> {
   try {
-    const fileExt =
-      uri.split(".").pop()?.toLowerCase() || (type === "video" ? "mov" : "jpg");
-    const fileName = `${partyId}/${type}_${Date.now()}.${fileExt}`;
-    const filePath = `party-media/${fileName}`;
+    const folder = `party-media/${partyId}`;
+    const result = await uploadToCloudinary(uri, type, folder);
 
-    let uploadData: ArrayBuffer;
-    let contentType: string;
-
-    if (type === "video") {
-      // Use fetch+arrayBuffer for videos — base64 is too slow/crashes for large files
-      const response = await fetch(uri);
-      uploadData = await response.arrayBuffer();
-      contentType = fileExt === "mp4" ? "video/mp4" : "video/quicktime";
-    } else {
-      // Use base64 for images
-      const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: "base64",
-      });
-      uploadData = decode(base64);
-      contentType = "image/jpeg";
-    }
-
-    const { data, error } = await supabase.storage
-      .from("flyers")
-      .upload(filePath, uploadData, { contentType, upsert: false });
-
-    if (error) throw error;
-
-    const {
-      data: { publicUrl },
-    } = supabase.storage.from("flyers").getPublicUrl(filePath);
-
-    const result: MediaUploadResult = { url: publicUrl };
-
-    // Generate real thumbnail for videos
-    if (type === "video") {
-      try {
-        const { uri: thumbUri } = await VideoThumbnails.getThumbnailAsync(uri, {
-          time: 1000,
-          quality: 0.6,
-        });
-
-        const thumbBase64 = await FileSystem.readAsStringAsync(thumbUri, {
-          encoding: "base64",
-        });
-
-        const thumbPath = `party-media/${partyId}/thumb_${Date.now()}.jpg`;
-
-        const { error: thumbError } = await supabase.storage
-          .from("flyers")
-          .upload(thumbPath, decode(thumbBase64), {
-            contentType: "image/jpeg",
-            upsert: true,
-          });
-
-        if (!thumbError) {
-          const {
-            data: { publicUrl: thumbPublicUrl },
-          } = supabase.storage.from("flyers").getPublicUrl(thumbPath);
-          result.thumbnailUrl = thumbPublicUrl;
-        }
-      } catch (thumbError) {
-        console.log("Thumbnail generation failed (non-fatal):", thumbError);
-      }
-    }
-
-    return result;
+    return {
+      url: result.url,
+      thumbnailUrl: result.thumbnailUrl,
+    };
   } catch (error) {
     console.error("Media upload error:", error);
     throw error;
@@ -203,21 +145,9 @@ export async function getPartyMedia(partyId: string) {
  */
 export async function deletePartyMedia(mediaId: string): Promise<void> {
   try {
-    const { data: media, error: fetchError } = await supabase
-      .from("party_media")
-      .select("media_url")
-      .eq("id", mediaId)
-      .single();
-
-    if (fetchError) throw fetchError;
-
-    const url = new URL(media.media_url);
-    const filePath = url.pathname.split("/flyers/")[1];
-
-    if (filePath) {
-      await supabase.storage.from("flyers").remove([filePath]);
-    }
-
+    // Note: Cloudinary assets remain unless deleted via signed API request.
+    // For now, we just remove the database record. 
+    // In production, an edge function should handle physical deletion from Cloudinary.
     const { error } = await supabase
       .from("party_media")
       .delete()

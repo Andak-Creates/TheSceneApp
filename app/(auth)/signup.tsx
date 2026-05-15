@@ -18,6 +18,7 @@ import {
 } from "react-native";
 import { useAuthStore } from "../../stores/authStore";
 import { supabase } from "../../lib/supabase";
+import { getFriendlyErrorMessage } from "../../lib/error-utils";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -67,18 +68,26 @@ export default function SignUpScreen() {
 
     let validReferral = undefined;
     if (referralCode.trim()) {
-       const { data: refUser } = await supabase
-         .from("profiles")
-         .select("id")
-         .ilike("referral_code", referralCode.trim())
-         .single();
-         
-       if (!refUser) {
-          setError("Invalid referral code. Please check and try again.");
-          setLoading(false);
-          return;
-       }
-       validReferral = referralCode.trim().toUpperCase();
+      try {
+        const { data: refUser, error: refError } = await supabase
+          .from("profiles")
+          .select("id")
+          .ilike("referral_code", referralCode.trim())
+          .single();
+          
+        if (refError) throw refError;
+          
+        if (!refUser) {
+           setError("Invalid referral code. Please check and try again.");
+           setLoading(false);
+           return;
+        }
+        validReferral = referralCode.trim().toUpperCase();
+      } catch (err: any) {
+        setError(getFriendlyErrorMessage(err));
+        setLoading(false);
+        return;
+      }
     }
 
     const { error: signUpError } = await signUp(email.trim(), password, username.trim(), validReferral);

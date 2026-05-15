@@ -13,6 +13,8 @@ import {
 } from "react-native";
 import { useAudioStore } from "../stores/audioStore";
 
+import { getOptimizedUrl } from "../lib/cloudinary";
+
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 interface MediaItem {
@@ -93,14 +95,14 @@ export default function MediaGalleryViewer({
     >
       {item.media_type === "image" ? (
         <Image
-          source={{ uri: item.media_url }}
+          source={{ uri: getOptimizedUrl(item.media_url, "image") }}
           style={{ width: "100%", height: "100%", backgroundColor: "#111" }}
           contentFit="cover"
         />
       ) : (
         <View className="flex-1">
           <VideoPlayer
-            videoUrl={item.media_url}
+            videoUrl={getOptimizedUrl(item.media_url, "video")}
             autoPlay={true}
             loop={true}
             // Only play if this gallery is active AND this slide is current AND fullscreen is closed
@@ -129,14 +131,14 @@ export default function MediaGalleryViewer({
     >
       {item.media_type === "image" ? (
         <Image
-          source={{ uri: item.media_url }}
+          source={{ uri: getOptimizedUrl(item.media_url, "image") }}
           style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT }}
           contentFit="contain"
         />
       ) : (
         <View style={{ flex: 1 }}>
           <VideoPlayer
-            videoUrl={item.media_url}
+            videoUrl={getOptimizedUrl(item.media_url, "video")}
             autoPlay={true}
             loop={false}
             showControls={true}
@@ -248,10 +250,12 @@ export default function MediaGalleryViewer({
                 ) : (
                   <Image
                     source={{
-                      uri:
+                      uri: getOptimizedUrl(
                         item.media_type === "video"
                           ? item.thumbnail_url!
                           : item.media_url,
+                        "image"
+                      ),
                     }}
                     style={{ width: 64, height: 64, backgroundColor: "#1a1a1a" }}
                     contentFit="cover"

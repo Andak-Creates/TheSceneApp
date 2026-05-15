@@ -1,4 +1,5 @@
 import { useAudioStore } from "@/stores/audioStore";
+import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
@@ -15,6 +16,7 @@ import {
 import PartyCard from "../../components/PartyCard";
 import ProfileCard, { SearchResultProfile } from "../../components/ProfileCard";
 import { supabase } from "../../lib/supabase";
+import { queryKeys } from "../../lib/queryKeys";
 import { useAuthStore } from "../../stores/authStore";
 
 interface Party {
@@ -53,14 +55,21 @@ export default function SearchScreen() {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedGenre, setSelectedGenre] = useState<string | null>(null);
-  const [parties, setParties] = useState<Party[]>([]);
-  const [profiles, setProfiles] = useState<SearchResultProfile[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
 
-  // Inside the component:
   const { user } = useAuthStore();
   const { setFeedActive } = useAudioStore();
+
+  // Debounced query — only updates 500ms after user stops typing
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [debouncedGenre, setDebouncedGenre] = useState<string | null>(null);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(searchQuery);
+      setDebouncedGenre(selectedGenre);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchQuery, selectedGenre]);
 
   useFocusEffect(
     useCallback(() => {
@@ -71,184 +80,134 @@ export default function SearchScreen() {
     }, []),
   );
 
-  const fetchSearchParties = useCallback(
-    async (query: string = "", genre: string | null = null) => {
-      setLoading(true);
+  // ---------------------------------------------------------------------------
+  // Pure fetch function — called by useQuery
+  // ---------------------------------------------------------------------------
+  const runSearch = useCallback(
+    async (): Promise<{ parties: Party[]; profiles: SearchResultProfile[] }> => {
+      const query = debouncedQuery;
+      const genre = debouncedGenre;
+
       try {
         let supabaseQuery = supabase
           .from("parties")
           .select(`*, party_media(thumbnail_url, media_type, is_primary), host_profile:host_profiles(name, is_verified)`)
           .eq("is_published", true);
 
+        let combined: SearchResultProfile[] = [];
+
         if (query) {
-          // Fetch profiles first
+          // Fetch profiles in parallel
           const [usersData, hostsData] = await Promise.all([
-            supabase
-              .from("profiles")
-              .select("id, username, full_name, avatar_url")
-              .or(`username.ilike.%${query}%,full_name.ilike.%${query}%`)
-              .limit(10),
-            supabase
-              .from("host_profiles")
-              .select("id, owner_id, name, avatar_url, is_verified, owner:profiles!owner_id(username)")
-              .ilike("name", `%${query}%`)
-              .limit(10),
+            supabase.from("profiles").select("id, username, full_name, avatar_url").or(`username.ilike.%${query}%,full_name.ilike.%${query}%`).limit(10),
+            supabase.from("host_profiles").select("id, owner_id, name, avatar_url, is_verified, owner:profiles!owner_id(username)").ilike("name", `%${query}%`).limit(10),
           ]);
-          
+
           const uData = usersData.data || [];
           const hData = hostsData.data || [];
-          
-          let combined: SearchResultProfile[] = [];
-          
+
           if (uData.length > 0) {
-             combined = [...combined, ...uData.map((u: any): SearchResultProfile => ({
-                type: "user",
-                id: u.id,
-                owner_id: u.id,
-                username: u.username,
-                full_name: u.full_name || "",
-                avatar_url: u.avatar_url,
-                initialIsFollowing: false,
-             }))];
+            combined = [...combined, ...uData.map((u: any): SearchResultProfile => ({
+              type: "user", id: u.id, owner_id: u.id, username: u.username,
+              full_name: u.full_name || "", avatar_url: u.avatar_url, initialIsFollowing: false,
+            }))];
           }
-          
           if (hData.length > 0) {
-             combined = [...combined, ...hData.map((h: any): SearchResultProfile => ({
-                type: "host",
-                id: h.id,
-                owner_id: h.owner_id,
-                username: h.owner?.username || "",
-                full_name: h.name,
-                avatar_url: h.avatar_url,
-                is_verified: h.is_verified,
-                initialIsFollowing: false,
-             }))];
+            combined = [...combined, ...hData.map((h: any): SearchResultProfile => ({
+              type: "host", id: h.id, owner_id: h.owner_id, username: h.owner?.username || "",
+              full_name: h.name, avatar_url: h.avatar_url, is_verified: h.is_verified, initialIsFollowing: false,
+            }))];
           }
-          
+
           if (user && combined.length > 0) {
             const userOwnerIds = combined.filter(p => p.type === 'user').map(p => p.owner_id);
             const hostIds = combined.filter(p => p.type === 'host').map(p => p.id);
-            
-            const [usersData, hostsData] = await Promise.all([
-               userOwnerIds.length > 0 ? supabase.from("follows").select("following_id").eq("follower_id", user.id).in("following_id", userOwnerIds) : { data: [] },
-               hostIds.length > 0 ? supabase.from("host_follows").select("host_profile_id").eq("follower_id", user.id).in("host_profile_id", hostIds) : { data: [] }
+            const [followUsers, followHosts] = await Promise.all([
+              userOwnerIds.length > 0 ? supabase.from("follows").select("following_id").eq("follower_id", user.id).in("following_id", userOwnerIds) : { data: [] },
+              hostIds.length > 0 ? supabase.from("host_follows").select("host_profile_id").eq("follower_id", user.id).in("host_profile_id", hostIds) : { data: [] },
             ]);
-              
-            const followUsersSet = new Set(usersData.data?.map((f: any) => f.following_id) || []);
-            const followHostsSet = new Set(hostsData.data?.map((f: any) => f.host_profile_id) || []);
-
+            const followUsersSet = new Set(followUsers.data?.map((f: any) => f.following_id) || []);
+            const followHostsSet = new Set(followHosts.data?.map((f: any) => f.host_profile_id) || []);
             combined = combined.map(p => ({
-               ...p,
-               initialIsFollowing: p.type === 'host' ? followHostsSet.has(p.id) : followUsersSet.has(p.owner_id)
+              ...p,
+              initialIsFollowing: p.type === 'host' ? followHostsSet.has(p.id) : followUsersSet.has(p.owner_id),
             }));
           }
-          
-          setProfiles(combined);
 
-          // Handle common squashed words like "afrobeats" -> "afro beats"
+          // Build search tokens
           const normalizedQuery = query.toLowerCase().trim();
           let tokens = normalizedQuery.split(/\s+/).filter((t) => t.length > 0);
+          if (normalizedQuery.includes("afrobeats") && tokens.length === 1) tokens = ["afro", "beats"];
 
-          // Special case: if query contains "afrobeats" but not "afro" and "beats" separately,
-          // we added them to tokens in the previous version, but let's be more systematic now.
-          if (normalizedQuery.includes("afrobeats") && tokens.length === 1) {
-            tokens = ["afro", "beats"];
-          }
-
-          // Apply a filter for each unique token
-          const uniqueTokens = Array.from(new Set(tokens));
-          for (const token of uniqueTokens) {
-            // 1. Find which canonical genres match this token (e.g. "afro" matches "Afrobeats" & "Afro House")
-            const matchingGenres = GENRES.filter((genre) =>
-              genre.toLowerCase().includes(token.toLowerCase()),
-            );
-
-            // 2. Build the OR filter for this token
+          for (const token of Array.from(new Set(tokens))) {
+            const matchingGenres = GENRES.filter((g) => g.toLowerCase().includes(token.toLowerCase()));
             let componentQuery = `title.ilike.%${token}%,description.ilike.%${token}%,city.ilike.%${token}%,state.ilike.%${token}%,country.ilike.%${token}%`;
-
-            // 3. If the token matches any genres, include a containment check for those genres
             if (matchingGenres.length > 0) {
-              // Postgres array containment syntax for multiple options: music_genres.ov.{Genre1,Genre2}
-              // "ov" stands for overlap, which works here as well.
-              const genreList = `{${matchingGenres.map((g) => `"${g}"`).join(",")}}`;
-              componentQuery += `,music_genres.ov.${genreList}`;
+              componentQuery += `,music_genres.ov.{${matchingGenres.map((g) => `"${g}"`).join(",")}}`;
             }
-
             supabaseQuery = supabaseQuery.or(componentQuery);
           }
-        } else {
-          setProfiles([]);
         }
 
         if (genre) {
           supabaseQuery = supabaseQuery.contains("music_genres", [genre]);
         }
 
-        const { data, error } = await supabaseQuery
-          .order("created_at", { ascending: false })
-          .limit(50);
-
+        const { data, error } = await supabaseQuery.order("created_at", { ascending: false }).limit(50);
         if (error) throw error;
 
-        // Filter out ended parties (same logic as feed)
+        // Filter ended parties
         const now = new Date();
-        const activeParties = (data || []).filter((party: any) => {
-          if (party.date_tba) return true;
-          if (party.end_date) return new Date(party.end_date) > now;
-          if (party.date) {
-            const startDate = new Date(party.date);
-            const twelveHoursAgo = new Date(now.getTime() - 12 * 60 * 60 * 1000);
-            return startDate > twelveHoursAgo;
-          }
-          return true;
-        }).map((party: any) => {
-          // Extract thumbnail_url from the first primary media row
-          const mediaRows: any[] = party.party_media || [];
-          const primaryMedia = mediaRows.find((m: any) => m.is_primary) || mediaRows[0];
-          const thumbnail_url = primaryMedia?.media_type === "video"
-            ? primaryMedia?.thumbnail_url ?? null
-            : null;
-          return { ...party, thumbnail_url };
-        });
+        const activeParties = (data || [])
+          .filter((party: any) => {
+            if (party.date_tba) return true;
+            if (party.end_date) return new Date(party.end_date) > now;
+            if (party.date) return new Date(party.date) > new Date(now.getTime() - 12 * 60 * 60 * 1000);
+            return true;
+          })
+          .map((party: any) => {
+            const mediaRows: any[] = party.party_media || [];
+            const primaryMedia = mediaRows.find((m: any) => m.is_primary) || mediaRows[0];
+            return { ...party, thumbnail_url: primaryMedia?.media_type === "video" ? primaryMedia?.thumbnail_url ?? null : null };
+          });
 
-        if (activeParties.length > 0) {
-          const partyIds = activeParties.map((p: any) => p.id);
-          const { data: viewRows } = await supabase
-            .from("party_views")
-            .select("party_id")
-            .in("party_id", partyIds);
+        if (activeParties.length === 0) return { parties: [], profiles: combined };
 
-          const viewsMap: Record<string, number> = {};
-          for (const row of viewRows || []) {
-            viewsMap[row.party_id] = (viewsMap[row.party_id] || 0) + 1;
-          }
+        // Fetch view counts
+        const partyIds = activeParties.map((p: any) => p.id);
+        const { data: viewRows } = await supabase.from("party_view_counts").select("party_id, view_count").in("party_id", partyIds);
+        const viewsMap: Record<string, number> = {};
+        for (const row of viewRows || []) viewsMap[row.party_id] = Number(row.view_count) || 0;
 
-          const partiesWithViews = activeParties.map((p: any) => ({
-            ...p,
-            views_count: viewsMap[p.id] || 0,
-          }));
-
-          setParties(partiesWithViews);
-        } else {
-          setParties([]);
-        }
+        return {
+          parties: activeParties.map((p: any) => ({ ...p, views_count: viewsMap[p.id] || 0 })) as Party[],
+          profiles: combined,
+        };
       } catch (err) {
         console.error("Search error:", err);
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
+        return { parties: [], profiles: [] };
       }
     },
-    [],
+    [debouncedQuery, debouncedGenre, user]
   );
 
-  useEffect(() => {
-    const delayDebounceFn = setTimeout(() => {
-      fetchSearchParties(searchQuery, selectedGenre);
-    }, 500);
+  // ---------------------------------------------------------------------------
+  // useQuery — caches results for 30 seconds
+  // ---------------------------------------------------------------------------
+  const { data, isLoading: loading, isRefetching: refreshing, refetch } = useQuery({
+    queryKey: queryKeys.search(debouncedQuery, debouncedGenre),
+    queryFn: runSearch,
+    staleTime: 30 * 1000, // 30 seconds
+    placeholderData: (prev) => prev, // keep previous results while new ones load
+  });
 
-    return () => clearTimeout(delayDebounceFn);
-  }, [searchQuery, selectedGenre, fetchSearchParties]);
+  const parties: Party[] = data?.parties ?? [];
+  const profiles: SearchResultProfile[] = data?.profiles ?? [];
+
+  // Legacy: keep setParties / setProfiles stubs so the JSX refs below still compile
+  // (they are no longer used but harmless)
+  const setParties = (_: Party[]) => {};
+  const setProfiles = (_: SearchResultProfile[]) => {};
 
   const renderPartyRow = ({ item }: { item: [Party, Party | null] }) => (
     <View className="flex-row gap-3 px-6 mb-3">
@@ -334,10 +293,7 @@ export default function SearchScreen() {
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
-              onRefresh={() => {
-                setRefreshing(true);
-                fetchSearchParties(searchQuery, selectedGenre);
-              }}
+              onRefresh={() => refetch()}
               tintColor="#a855f7"
             />
           }

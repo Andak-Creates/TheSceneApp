@@ -9,7 +9,7 @@ import {
   ScrollView,
   Text,
   TouchableOpacity,
-  View
+  View,
 } from "react-native";
 import PartyCard from "../../components/PartyCard";
 import { supabase } from "../../lib/supabase";
@@ -104,9 +104,7 @@ export default function HostProfileScreen() {
     try {
       const { data, error } = await supabase
         .from("host_profiles")
-        .select(
-          `*, owner:profiles!owner_id (username, is_host)`,
-        )
+        .select(`*, owner:profiles!owner_id (username, is_host)`)
         .eq("id", hostProfileId)
         .single();
 
@@ -183,28 +181,29 @@ export default function HostProfileScreen() {
         // Fetch view counts in one batched query
         const partyIds = parties.map((p) => p.id);
         const { data: viewRows } = await supabase
-          .from("party_views")
-          .select("party_id")
+          .from("party_view_counts")
+          .select("party_id, view_count")
           .in("party_id", partyIds);
 
         const viewsMap: Record<string, number> = {};
         for (const row of viewRows || []) {
-          viewsMap[row.party_id] = (viewsMap[row.party_id] || 0) + 1;
+          viewsMap[row.party_id] = Number(row.view_count) || 0;
         }
 
         setAllParties(
           parties.map((p: any) => {
             const mediaRows: any[] = p.party_media || [];
-            const primaryMedia = mediaRows.find((m: any) => m.is_primary) || mediaRows[0];
+            const primaryMedia =
+              mediaRows.find((m: any) => m.is_primary) || mediaRows[0];
             return {
               ...p,
               views_count: viewsMap[p.id] || 0,
               thumbnail_url:
                 primaryMedia?.media_type === "video"
-                  ? primaryMedia?.thumbnail_url ?? null
+                  ? (primaryMedia?.thumbnail_url ?? null)
                   : null,
             };
-          })
+          }),
         );
       } else {
         setAllParties([]);
@@ -271,7 +270,11 @@ export default function HostProfileScreen() {
           profile.owner_id,
           "👤 New follower",
           `${followerProfile?.username || "Someone"} started following ${profile.name}`,
-          { type: "host_follower", follower_id: user.id, host_profile_id: hostProfileId }
+          {
+            type: "host_follower",
+            follower_id: user.id,
+            host_profile_id: hostProfileId,
+          },
         );
       }
     } catch (error) {
@@ -283,7 +286,6 @@ export default function HostProfileScreen() {
       }));
     }
   };
-
 
   const now = new Date();
 
@@ -306,9 +308,12 @@ export default function HostProfileScreen() {
 
   const getActiveParties = (): Party[] => {
     switch (activeTab) {
-      case "upcoming": return upcomingParties;
-      case "past": return pastParties;
-      case "all": return allParties;
+      case "upcoming":
+        return upcomingParties;
+      case "past":
+        return pastParties;
+      case "all":
+        return allParties;
     }
   };
 
@@ -368,7 +373,7 @@ export default function HostProfileScreen() {
       className="flex-1 bg-[#191022]"
       showsVerticalScrollIndicator={false}
     >
-      <View className="pt-12 px-6 pb-12">
+      <View className="pt-12 mt-6 px-6 pb-12">
         <TouchableOpacity
           onPress={() => router.back()}
           className="w-10 h-10 rounded-full bg-white/10 items-center justify-center mb-6"
@@ -380,10 +385,15 @@ export default function HostProfileScreen() {
         <View className="items-center mb-6">
           {profile.avatar_url ? (
             <ExpoImage
-  source={{ uri: profile.avatar_url }}
-  style={{ width: 96, height: 96, borderRadius: 48, marginBottom: 16 }}
-  contentFit="cover"
-/>
+              source={{ uri: profile.avatar_url }}
+              style={{
+                width: 96,
+                height: 96,
+                borderRadius: 48,
+                marginBottom: 16,
+              }}
+              contentFit="cover"
+            />
           ) : (
             <View className="w-24 h-24 rounded-full bg-purple-600 items-center justify-center mb-4">
               <Text className="text-white text-3xl font-bold">
@@ -394,14 +404,16 @@ export default function HostProfileScreen() {
 
           <View className="items-center mb-3">
             <View className="flex-row items-center gap-2">
-              <Text className="text-white text-2xl font-bold">{profile.name}</Text>
+              <Text className="text-white text-2xl font-bold">
+                {profile.name}
+              </Text>
               {profile.is_verified && (
                 <Ionicons name="checkmark-circle" size={15} color="#a855f7" />
               )}
             </View>
             {profile.owner?.username && (
               <Text className="text-gray-400 text-base">
-                @{profile.owner.username}
+                @{profile.owner.username.toLowerCase().replace(/\s+/g, "-")}
               </Text>
             )}
           </View>
@@ -431,20 +443,28 @@ export default function HostProfileScreen() {
               className="px-8 py-3 rounded-full bg-purple-600 flex-row items-center"
             >
               <Ionicons name="wallet-outline" size={20} color="#fff" />
-              <Text className="text-white font-bold ml-2">Earnings Dashboard</Text>
+              <Text className="text-white font-bold ml-2">
+                Earnings Dashboard
+              </Text>
             </TouchableOpacity>
           )}
         </View>
 
         {/* Host Stats */}
         <View className="flex-row bg-white/5 rounded-2xl p-4 mb-4">
-          <View className={`flex-1 items-center ${isOwner ? "border-r" : "border-r"} border-white/10`}>
-            <Text className="text-white text-2xl font-bold">{stats.partiesHosted}</Text>
+          <View
+            className={`flex-1 items-center ${isOwner ? "border-r" : "border-r"} border-white/10`}
+          >
+            <Text className="text-white text-2xl font-bold">
+              {stats.partiesHosted}
+            </Text>
             <Text className="text-gray-400 text-xs mt-1">Hosted</Text>
           </View>
           {isOwner && (
             <View className="flex-1 items-center border-r border-white/10">
-              <Text className="text-white text-2xl font-bold">{stats.totalTicketsSold}</Text>
+              <Text className="text-white text-2xl font-bold">
+                {stats.totalTicketsSold}
+              </Text>
               <Text className="text-gray-400 text-xs mt-1">Tickets Sold</Text>
             </View>
           )}
@@ -464,11 +484,15 @@ export default function HostProfileScreen() {
         {/* Followers/Following */}
         <View className="flex-row bg-white/5 rounded-2xl p-4 mb-6">
           <View className="flex-1 items-center border-r border-white/10">
-            <Text className="text-white text-xl font-bold">{stats.followers}</Text>
+            <Text className="text-white text-xl font-bold">
+              {stats.followers}
+            </Text>
             <Text className="text-gray-400 text-xs mt-1">Followers</Text>
           </View>
           <View className="flex-1 items-center">
-            <Text className="text-white text-xl font-bold">{stats.following}</Text>
+            <Text className="text-white text-xl font-bold">
+              {stats.following}
+            </Text>
             <Text className="text-gray-400 text-xs mt-1">Following</Text>
           </View>
         </View>

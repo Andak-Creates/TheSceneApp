@@ -1,7 +1,8 @@
 import { useAudioStore } from "@/stores/audioStore";
 import { Ionicons } from "@expo/vector-icons";
+import { useQuery } from "@tanstack/react-query";
 import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -10,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { queryKeys } from "../../lib/queryKeys";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "../../stores/authStore";
 
@@ -32,83 +34,79 @@ interface EarningLog {
   };
 }
 
+interface EarningsData {
+  balance: HostBalance;
+  logs: EarningLog[];
+}
+
 export default function HostEarningsScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
-
-  const [balance, setBalance] = useState<HostBalance | null>(null);
-  const [logs, setLogs] = useState<EarningLog[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-
-  // Inside the component:
   const { setFeedActive } = useAudioStore();
 
   useFocusEffect(
     useCallback(() => {
       setFeedActive(false);
-      return () => {
-        setFeedActive(true);
-      };
+      return () => setFeedActive(true);
     }, []),
   );
 
-  useEffect(() => {
-    if (user) {
-      fetchEarningsData();
-    }
-  }, [user]);
+  // ---------------------------------------------------------------------------
+  // Pure fetch function
+  // ---------------------------------------------------------------------------
+  const fetchEarningsData = async (): Promise<EarningsData> => {
+    if (!user) throw new Error("Not authenticated");
 
-  const fetchEarningsData = async () => {
-    if (!user) return;
-
-    try {
-      // Fetch balance
-      const { data: balanceData, error: balanceError } = await supabase
+    const [balanceRes, logsRes] = await Promise.all([
+      supabase
         .from("host_balances")
         .select("*")
         .eq("user_id", user.id)
-        .single();
-
-      if (balanceError && balanceError.code !== "PGRST116") {
-        console.error("Error fetching balance:", balanceError);
-      }
-      setBalance(
-        balanceData || {
-          total_earned: 0,
-          total_withdrawn: 0,
-          current_balance: 0,
-          currency: "NGN",
-        },
-      );
-
-      // Fetch logs
-      const { data: logsData, error: logsError } = await supabase
+        .single(),
+      supabase
         .from("host_earnings_logs")
-        .select(
-          `
-          *,
-          party:parties(title)
-        `,
-        )
+        .select("*, party:parties(title)")
         .eq("host_id", user.id)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false }),
+    ]);
 
-      if (logsError) throw logsError;
-      setLogs(logsData || []);
-    } catch (error) {
-      console.error("Error fetching earnings data:", error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+    if (balanceRes.error && balanceRes.error.code !== "PGRST116") {
+      console.error("Error fetching balance:", balanceRes.error);
     }
+    if (logsRes.error) throw logsRes.error;
+
+    return {
+      balance: balanceRes.data || {
+        total_earned: 0,
+        total_withdrawn: 0,
+        current_balance: 0,
+        currency: "NGN",
+      },
+      logs: logsRes.data || [],
+    };
   };
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    fetchEarningsData();
-  };
+  // ---------------------------------------------------------------------------
+  // useQuery — 2 min staleTime, balance doesn't change frequently
+  // ---------------------------------------------------------------------------
+  const {
+    data,
+    isLoading: loading,
+    isRefetching: refreshing,
+    refetch,
+  } = useQuery({
+    queryKey: queryKeys.hostEarnings(user?.id ?? ""),
+    queryFn: fetchEarningsData,
+    enabled: !!user,
+    staleTime: 2 * 60 * 1000,
+  });
 
+  const balance = data?.balance ?? null;
+  const logs = data?.logs ?? [];
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
   const formatCurrency = (amount: number, code: string) => {
     const symbols: Record<string, string> = {
       NGN: "₦",
@@ -121,8 +119,7 @@ export default function HostEarningsScreen() {
       AUD: "A$",
       CAD: "CA$",
     };
-    const symbol = symbols[code] || code + " ";
-    return `${symbol}${amount.toLocaleString()}`;
+    return `${symbols[code] || code + " "}${amount.toLocaleString()}`;
   };
 
   const formatDate = (dateString: string) => {
@@ -146,12 +143,12 @@ export default function HostEarningsScreen() {
   return (
     <View className="flex-1 bg-[#191022]">
       {/* Header */}
-      <View className="pt-12 px-6 pb-4 flex-row items-center border-b border-white/10">
+      <View className="pt-[50px] px-6 pb-4 flex-row items-center border-b border-white/10">
         <TouchableOpacity onPress={() => router.back()} className="mr-4">
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text className="text-white text-xl font-bold flex-1">
-          Earnings & Payouts
+          Earnings &amp; Payouts
         </Text>
       </View>
 
@@ -161,7 +158,7 @@ export default function HostEarningsScreen() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={onRefresh}
+            onRefresh={() => refetch()}
             tintColor="#8B5CF6"
           />
         }
@@ -244,9 +241,6 @@ export default function HostEarningsScreen() {
             <View className="items-end">
               <Text className="text-green-400 font-bold text-base">
                 +{formatCurrency(item.net_amount, item.currency)}
-              </Text>
-              <Text className="text-gray-500 text-[10px]">
-                Fee: {formatCurrency(item.fee_amount, item.currency)}
               </Text>
             </View>
           </View>

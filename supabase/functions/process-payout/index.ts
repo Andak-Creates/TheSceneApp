@@ -8,21 +8,62 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const PAYSTACK_SECRET_KEY = Deno.env.get("PAYSTACK_SECRET_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
 
 serve(async (req) => {
-  const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  const supabaseAdmin = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+  
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
+  const supabaseAuth = createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
+    global: { headers: { Authorization: authHeader } },
+  });
 
   try {
+    const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+    if (authError || !user) throw new Error("Unauthorized");
+
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("is_admin")
+      .eq("id", user.id)
+      .single();
+
+    if (!profile?.is_admin) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     const { record } = await req.json();
 
     if (!record || record.status !== "approved") {
-      return new Response(JSON.stringify({ message: "Not an approved withdrawal" }), { status: 200 });
+      return new Response(JSON.stringify({ message: "Not an approved withdrawal" }), { status: 200, headers: corsHeaders });
     }
 
-    const { id, host_id, amount, bank_account_id } = record;
+    // Securely fetch the real details from the database
+    const { data: withdrawal, error: wdError } = await supabaseAdmin
+      .from("withdrawal_requests")
+      .select("*")
+      .eq("id", record.id)
+      .single();
+
+    if (wdError || !withdrawal) throw new Error("Withdrawal request not found");
+
+    const { id, host_id, amount, bank_account_id } = withdrawal;
 
     // 1. Get host bank account details
-    const { data: bankAccount, error: bankError } = await supabase
+    const { data: bankAccount, error: bankError } = await supabaseAdmin
       .from("host_bank_accounts")
       .select("*")
       .eq("id", bank_account_id)
@@ -61,7 +102,7 @@ serve(async (req) => {
       recipientCode = recipientData.data.recipient_code;
 
       // Save it back so we only create once
-      const { error: saveErr } = await supabase
+      const { error: saveErr } = await supabaseAdmin
         .from("host_bank_accounts")
         .update({ recipient_code: recipientCode })
         .eq("id", bank_account_id);
@@ -94,7 +135,7 @@ serve(async (req) => {
       console.error("Paystack transfer failed:", payoutResult);
 
       // Reset DB row so admin can retry
-      await supabase
+      await supabaseAdmin
         .from("withdrawal_requests")
         .update({
           status: "pending",
@@ -106,7 +147,7 @@ serve(async (req) => {
     }
 
     // 4. Mark withdrawal completed with transfer reference
-    const { error: updateError } = await supabase
+    const { error: updateError } = await supabaseAdmin
       .from("withdrawal_requests")
       .update({
         status: "completed",
@@ -117,22 +158,19 @@ serve(async (req) => {
 
     if (updateError) throw updateError;
 
-    // 5. Deduct from host_balances
-    await supabase.rpc("deduct_host_balance", {
-      p_user_id: host_id,
-      p_amount: amount,
-    }).throwOnError();
-
+    // 5. Balance deduction is now handled automatically by the DB trigger 'trg_withdrawal_lifecycle'
+    // when the status moves from 'pending' to 'completed'. Removing manual RPC to prevent double-deduction.
+    
     return new Response(
       JSON.stringify({ success: true, reference: payoutResult.data.reference }),
-      { headers: { "Content-Type": "application/json" }, status: 200 }
+      { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
     );
 
   } catch (error: any) {
     console.error("Payout Processing Error:", error.message);
     return new Response(
       JSON.stringify({ error: error.message }),
-      { headers: { "Content-Type": "application/json" }, status: 400 }
+      { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
     );
   }
 });
