@@ -113,6 +113,28 @@ Deno.serve(async (req) => {
       .eq("id", tierId)
       .single();
 
+    // BEFORE inserting the ticket, check capacity atomically
+    const { data: capacityResult, error: capacityError } = await supabase.rpc('purchase_tickets_atomic', {
+      p_tier_id: tierId,
+      p_quantity: quantity,
+    });
+
+    if (capacityError || !capacityResult?.success) {
+      const errReason = capacityResult?.error || capacityError?.message || "Unknown error";
+      let errMsg = "Failed to reserve tickets.";
+      
+      if (errReason === 'sold_out') {
+        errMsg = "Sorry, these tickets are sold out.";
+      } else if (errReason === 'exceeds_limit') {
+        errMsg = `Max ${capacityResult.max} tickets per order for this tier.`;
+      }
+      
+      return new Response(
+        JSON.stringify({ error: errMsg }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // Insert ticket (service role bypasses RLS)
     const { data: ticket, error: ticketError } = await supabase
       .from("tickets")

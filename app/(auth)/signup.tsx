@@ -68,21 +68,33 @@ export default function SignUpScreen() {
 
     let validReferral = undefined;
     if (referralCode.trim()) {
+      const cleanRefCode = referralCode.trim().toUpperCase();
       try {
-        const { data: refUser, error: refError } = await supabase
+        // 1. Check profiles table (standard user referral)
+        const { data: refProfile } = await supabase
           .from("profiles")
           .select("id")
-          .ilike("referral_code", referralCode.trim())
-          .single();
+          .ilike("referral_code", cleanRefCode)
+          .maybeSingle();
           
-        if (refError) throw refError;
-          
-        if (!refUser) {
-           setError("Invalid referral code. Please check and try again.");
-           setLoading(false);
-           return;
+        if (refProfile) {
+          validReferral = cleanRefCode;
+        } else {
+          // 2. Fallback: Check agents table (ambassador referral)
+          const { data: refAgent } = await supabase
+            .from("agents")
+            .select("id")
+            .ilike("code", cleanRefCode)
+            .maybeSingle();
+            
+          if (refAgent) {
+            validReferral = cleanRefCode;
+          } else {
+            setError("Invalid referral code. Please check and try again.");
+            setLoading(false);
+            return;
+          }
         }
-        validReferral = referralCode.trim().toUpperCase();
       } catch (err: any) {
         setError(getFriendlyErrorMessage(err));
         setLoading(false);

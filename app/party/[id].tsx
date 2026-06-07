@@ -23,6 +23,7 @@ import {
   Modal,
   Platform,
   ScrollView,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -95,6 +96,7 @@ interface TicketTier {
   price: number;
   quantity: number;
   quantity_sold: number;
+  max_per_order?: number | null;
 }
 
 export default function PartyDetailScreen() {
@@ -183,6 +185,10 @@ export default function PartyDetailScreen() {
   const [editingTierId, setEditingTierId] = useState<string | null>(null);
   const [editTierName, setEditTierName] = useState("");
   const [editTierPrice, setEditTierPrice] = useState("");
+  const [editTierMaxPerOrder, setEditTierMaxPerOrder] = useState("");
+  const [editTierLimitOn, setEditTierLimitOn] = useState(true);
+  const [newTierMaxPerOrder, setNewTierMaxPerOrder] = useState("2");
+  const [newTierLimitOn, setNewTierLimitOn] = useState(true);
 
   const recordPartyView = async () => {
     if (!partyId || viewRecorded.current) return;
@@ -425,6 +431,7 @@ export default function PartyDetailScreen() {
         .update({
           name: editTierName.trim(),
           price: price,
+          max_per_order: editTierLimitOn && editTierMaxPerOrder.trim() !== "" ? parseInt(editTierMaxPerOrder) : null,
         })
         .eq("id", tierId);
 
@@ -514,6 +521,7 @@ export default function PartyDetailScreen() {
         tier_order: ticketTiers.length,
         is_active: true,
         currency_code: party?.currency_code || "NGN",
+        max_per_order: newTierLimitOn && newTierMaxPerOrder.trim() !== "" ? parseInt(newTierMaxPerOrder) : null,
       });
 
       if (tierError) throw tierError;
@@ -541,6 +549,8 @@ export default function PartyDetailScreen() {
       setNewTierName("");
       setNewTierPrice("");
       setNewTierQuantity("");
+      setNewTierMaxPerOrder("2");
+      setNewTierLimitOn(true);
       await invalidateParty();
       Alert.alert("Success", "New ticket tier added successfully");
     } catch (error) {
@@ -637,17 +647,7 @@ export default function PartyDetailScreen() {
           );
       }
 
-      setParty({
-        ...party,
-        title: editedTitle,
-        description: editedDescription,
-        location: editedLocation.trim(),
-        city: editedCity.trim(),
-        date: editedDateTba ? null : editedDate,
-        date_tba: editedDateTba,
-        location_tba: editedLocationTba,
-        dress_code: editedDressCode.trim() || null,
-      } as Party);
+      await invalidateParty();
       setIsEditing(false);
       Alert.alert("Success", "Party updated successfully");
     } catch (error) {
@@ -1710,6 +1710,29 @@ export default function PartyDetailScreen() {
                         value={editTierPrice}
                         onChangeText={setEditTierPrice}
                       />
+                      <View className="bg-white/5 rounded-xl p-3 mb-4 border border-white/5">
+                        <View className="flex-row justify-between items-center">
+                          <Text className="text-white font-semibold text-sm">Limit per person</Text>
+                          <Switch
+                            value={editTierLimitOn}
+                            onValueChange={setEditTierLimitOn}
+                            trackColor={{ false: "#333", true: "#a855f7" }}
+                            thumbColor="#fff"
+                          />
+                        </View>
+                        {editTierLimitOn && (
+                          <View className="mt-3 pt-3 border-t border-white/5 flex-row items-center justify-between">
+                            <Text className="text-gray-400 text-xs">Max tickets per order:</Text>
+                            <TextInput
+                              className="bg-white/10 rounded-lg px-3 py-1.5 text-white w-16 text-center"
+                              value={editTierMaxPerOrder}
+                              onChangeText={setEditTierMaxPerOrder}
+                              keyboardType="numeric"
+                              maxLength={3}
+                            />
+                          </View>
+                        )}
+                      </View>
                       <View className="flex-row gap-3">
                         <TouchableOpacity
                           onPress={() => setEditingTierId(null)}
@@ -1740,6 +1763,9 @@ export default function PartyDetailScreen() {
                                 setEditingTierId(tier.id);
                                 setEditTierName(tier.name);
                                 setEditTierPrice(tier.price.toString());
+                                const hasLimit = tier.max_per_order != null;
+                                setEditTierLimitOn(hasLimit);
+                                setEditTierMaxPerOrder(hasLimit ? String(tier.max_per_order) : "2");
                               }}
                             >
                               <Ionicons
@@ -1842,6 +1868,29 @@ export default function PartyDetailScreen() {
                     onChangeText={setNewTierQuantity}
                   />
                 </View>
+                <View className="bg-white/5 rounded-xl p-3 mb-4 border border-white/5">
+                  <View className="flex-row justify-between items-center">
+                    <Text className="text-white font-semibold text-sm">Limit per person</Text>
+                    <Switch
+                      value={newTierLimitOn}
+                      onValueChange={setNewTierLimitOn}
+                      trackColor={{ false: "#333", true: "#a855f7" }}
+                      thumbColor="#fff"
+                    />
+                  </View>
+                  {newTierLimitOn && (
+                    <View className="mt-3 pt-3 border-t border-white/5 flex-row items-center justify-between">
+                      <Text className="text-gray-400 text-xs">Max tickets per order:</Text>
+                      <TextInput
+                        className="bg-white/10 rounded-lg px-3 py-1.5 text-white w-16 text-center"
+                        value={newTierMaxPerOrder}
+                        onChangeText={setNewTierMaxPerOrder}
+                        keyboardType="numeric"
+                        maxLength={3}
+                      />
+                    </View>
+                  )}
+                </View>
                 <TouchableOpacity
                   onPress={handleAddNewTier}
                   disabled={saving}
@@ -1860,7 +1909,4 @@ export default function PartyDetailScreen() {
       </Modal>
     </View>
   );
-}
-function setParty(arg0: Party) {
-  throw new Error("Function not implemented.");
 }

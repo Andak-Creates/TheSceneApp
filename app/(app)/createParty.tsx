@@ -1,5 +1,6 @@
 import CurrencySelector from "@/components/CurrencySelector";
 import MediaGalleryUploader from "@/components/MediaGalleryUploader";
+import { Switch } from "react-native";
 import TBAToggle from "@/components/TBAToggle";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
@@ -66,6 +67,8 @@ interface TicketTier {
   name: string;
   price: string;
   quantity: string;
+  maxPerOrder: string;
+  isLimitOn: boolean;
 }
 
 interface MediaItem {
@@ -299,7 +302,7 @@ export default function CreatePartyScreen() {
     setSelectedGenres([]);
     setSelectedVibes([]);
     setTicketTiers([
-      { id: "1", name: "General Admission", price: "", quantity: "" },
+      { id: "1", name: "General Admission", price: "", quantity: "", maxPerOrder: "2", isLimitOn: true },
     ]);
 
     let prefCurr = "NGN";
@@ -361,7 +364,7 @@ export default function CreatePartyScreen() {
 
   // Step 4: Tickets
   const [ticketTiers, setTicketTiers] = useState<TicketTier[]>([
-    { id: "1", name: "General Admission", price: "", quantity: "" },
+    { id: "1", name: "General Admission", price: "", quantity: "", maxPerOrder: "2", isLimitOn: true },
   ]);
   const [currency, setCurrency] = useState("NGN");
   const [error, setError] = useState("");
@@ -381,7 +384,7 @@ export default function CreatePartyScreen() {
   const addTicketTier = () => {
     setTicketTiers([
       ...ticketTiers,
-      { id: Date.now().toString(), name: "", price: "", quantity: "" },
+      { id: Date.now().toString(), name: "", price: "", quantity: "", maxPerOrder: "2", isLimitOn: true },
     ]);
   };
 
@@ -394,7 +397,7 @@ export default function CreatePartyScreen() {
   const updateTicketTier = (
     id: string,
     field: keyof TicketTier,
-    value: string,
+    value: string | boolean,
   ) => {
     setTicketTiers(
       ticketTiers.map((tier) =>
@@ -589,6 +592,7 @@ export default function CreatePartyScreen() {
           tier_order: index,
           is_active: true,
           currency_code: currency,
+          max_per_order: tier.isLimitOn && tier.maxPerOrder.trim() !== "" ? safeParseInt(tier.maxPerOrder) : null,
         }));
         const { error: tiersError } = await supabase
           .from("ticket_tiers")
@@ -1324,7 +1328,7 @@ export default function CreatePartyScreen() {
                       updateTicketTier(tier.id, "name", val)
                     }
                   />
-                  <View className="flex-row gap-4">
+                  <View className="flex-row gap-4 mb-4">
                     <TextInput
                       className="flex-1 bg-[#09030e] border border-white/5 rounded-2xl px-5 py-4 text-white"
                       placeholder={`Price (${currency})`}
@@ -1345,6 +1349,35 @@ export default function CreatePartyScreen() {
                       }
                       keyboardType="numeric"
                     />
+                  </View>
+
+                  {/* Limit Per Order Toggle */}
+                  <View className="bg-[#09030e] border border-white/5 rounded-2xl p-4">
+                    <View className="flex-row justify-between items-center">
+                      <View>
+                        <Text className="text-white font-semibold">Limit per person</Text>
+                        <Text className="text-gray-500 text-xs mt-1">Cap max tickets per order</Text>
+                      </View>
+                      <Switch
+                        value={tier.isLimitOn}
+                        onValueChange={(val) => updateTicketTier(tier.id, "isLimitOn", val)}
+                        trackColor={{ false: "#333", true: "#a855f7" }}
+                        thumbColor="#fff"
+                      />
+                    </View>
+                    
+                    {tier.isLimitOn && (
+                      <View className="mt-4 pt-4 border-t border-white/5 flex-row items-center justify-between">
+                        <Text className="text-gray-400 text-sm">Max tickets per order:</Text>
+                        <TextInput
+                          className="bg-white/10 border border-white/10 rounded-xl px-4 py-2 text-white w-20 text-center"
+                          value={tier.maxPerOrder}
+                          onChangeText={(val) => updateTicketTier(tier.id, "maxPerOrder", val)}
+                          keyboardType="numeric"
+                          maxLength={3}
+                        />
+                      </View>
+                    )}
                   </View>
                 </View>
               ))}

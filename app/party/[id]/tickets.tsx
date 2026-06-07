@@ -45,6 +45,7 @@ interface TicketTier {
   quantity: number;
   quantity_sold: number;
   available: number;
+  max_per_order?: number | null;
 }
 
 // App fee: 5% of ticket subtotal
@@ -129,6 +130,7 @@ export default function TicketPurchaseScreen() {
         quantity: tier.quantity,
         quantity_sold: tier.quantity_sold || 0,
         available: tier.quantity - (tier.quantity_sold || 0),
+        max_per_order: tier.max_per_order,
       }));
 
       setTicketTiers(tiers);
@@ -151,6 +153,11 @@ export default function TicketPurchaseScreen() {
 
     if (quantity > tier.available) {
       Alert.alert("Error", "Not enough tickets available");
+      return;
+    }
+    const maxLimit = tier.max_per_order ?? 999999;
+    if (quantity > maxLimit) {
+      Alert.alert("Error", `Max ${tier.max_per_order} tickets per order for this tier`);
       return;
     }
 
@@ -263,6 +270,27 @@ export default function TicketPurchaseScreen() {
     }
 
     try {
+      // BEFORE inserting the ticket, check capacity atomically
+      const { data: capacityResult, error: capacityError } = await supabase.rpc('purchase_tickets_atomic', {
+        p_tier_id: purchase.tierId,
+        p_quantity: purchase.quantity,
+      });
+
+      if (capacityError || !capacityResult?.success) {
+        const errReason = capacityResult?.error || capacityError?.message || "Unknown error";
+        let errMsg = "Failed to reserve tickets.";
+        
+        if (errReason === 'sold_out') {
+          errMsg = "Sorry, these tickets are sold out.";
+        } else if (errReason === 'exceeds_limit') {
+          errMsg = `Max ${capacityResult.max} tickets per order for this tier.`;
+        }
+        
+        setPurchasing(false);
+        Alert.alert("Transaction Failed", errMsg + "\nIf you were charged, please contact support with reference: " + reference);
+        return;
+      }
+
       const { data: ticketData, error: ticketError } = await supabase
         .from("tickets")
         .insert({
@@ -317,11 +345,19 @@ export default function TicketPurchaseScreen() {
       );
     } catch (error: any) {
       console.error("Ticket creation error:", error);
-      Alert.alert(
-        "Payment Received",
-        "Your payment was successful but we had trouble creating your ticket. Please contact support with reference: " +
-          reference,
-      );
+      const isFree = purchase.totalPrice === 0;
+      if (isFree) {
+        Alert.alert(
+          "Ticket Creation Failed",
+          "We had trouble creating your ticket. Please try again or contact support with reference: " + reference,
+        );
+      } else {
+        Alert.alert(
+          "Payment Received",
+          "Your payment was successful but we had trouble creating your ticket. Please contact support with reference: " +
+            reference,
+        );
+      }
     } finally {
       setPurchasing(false);
     }
@@ -525,9 +561,16 @@ export default function TicketPurchaseScreen() {
           {/* Quantity Selector */}
           {selectedTierData && selectedTierData.available > 0 && (
             <View className="mt-6">
-              <Text className="text-white font-bold text-base mb-3">
-                Quantity
-              </Text>
+              <View className="flex-row items-center gap-2 mb-3">
+                <Text className="text-white font-bold text-base">Quantity</Text>
+                {selectedTierData.max_per_order && (
+                  <View className="bg-purple-600/20 px-2 py-1 rounded-md">
+                    <Text className="text-purple-400 text-xs font-semibold">
+                      Max {selectedTierData.max_per_order}
+                    </Text>
+                  </View>
+                )}
+              </View>
               <View className="flex-row items-center justify-between bg-white/5 rounded-2xl p-4">
                 <TouchableOpacity
                   onPress={() => setQuantity(Math.max(1, quantity - 1))}
@@ -546,17 +589,17 @@ export default function TicketPurchaseScreen() {
                 <TouchableOpacity
                   onPress={() =>
                     setQuantity(
-                      Math.min(selectedTierData.available, quantity + 1),
+                      Math.min(selectedTierData.available, selectedTierData.max_per_order ?? 999999, quantity + 1),
                     )
                   }
                   className="w-10 h-10 rounded-full bg-white/10 items-center justify-center"
-                  disabled={quantity >= selectedTierData.available}
+                  disabled={quantity >= selectedTierData.available || (selectedTierData.max_per_order && quantity >= selectedTierData.max_per_order)}
                 >
                   <Ionicons
                     name="add"
                     size={20}
                     color={
-                      quantity >= selectedTierData.available ? "#666" : "#fff"
+                      quantity >= selectedTierData.available || (selectedTierData.max_per_order && quantity >= selectedTierData.max_per_order) ? "#666" : "#fff"
                     }
                   />
                 </TouchableOpacity>
