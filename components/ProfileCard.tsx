@@ -142,9 +142,6 @@ export default function ProfileCard({ profile }: ProfileCardProps) {
           <Text className="text-white font-bold text-base" numberOfLines={1}>
             {profile.full_name || profile.username}
           </Text>
-          {profile.is_verified && (
-            <Ionicons name="checkmark-circle" size={12} color="#a855f7" />
-          )}
         </View>
 
         <View className="flex-row items-center">

@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import * as Linking from "expo-linking";
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   ImageBackground,
@@ -28,59 +28,91 @@ export default function ResetPasswordScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+  const sessionCreated = React.useRef(false);
 
-  // Parse the deep link to attempt setting the session if needed.
-  // Sometimes Supabase handles it if PKCE, but as fallback we capture from hash.
+  const params = useLocalSearchParams();
+  const code = params.code as string;
+  const error_description = params.error_description as string;
+  
+  // We add a ref to avoid running the exchange multiple times
+  const [initialUrl, setInitialUrl] = useState<string | null>(null);
+
   useEffect(() => {
-    const handleUrl = async () => {
-      if (url) {
-        let access_token = null;
-        let refresh_token = null;
+    // Manually fetch the initial URL to handle cold-start race conditions
+    Linking.getInitialURL().then((deepUrl) => {
+      if (deepUrl) setInitialUrl(deepUrl);
+    });
+  }, []);
 
-        // 1. Check for Supabase error redirects first
-        const parsed = Linking.parse(url);
-        if (parsed.queryParams?.error_description) {
-          setError(
-            (parsed.queryParams.error_description as string).replace(/\+/g, ' ')
-          );
-          return;
-        }
-
-        // 2. Check hash for implicit flow tokens
-        const hashPart = url.split('#')[1];
-        if (hashPart) {
-          const params = new URLSearchParams(hashPart);
-          access_token = params.get('access_token');
-          refresh_token = params.get('refresh_token');
-        }
-
-        // 3. Try query params if PKCE
-        if (!access_token || !refresh_token) {
-          if (parsed.queryParams?.access_token && parsed.queryParams?.refresh_token) {
-             access_token = parsed.queryParams.access_token as string;
-             refresh_token = parsed.queryParams.refresh_token as string;
-          } else if (parsed.queryParams?.code) {
-             const { error: pkceError } = await supabase.auth.exchangeCodeForSession(parsed.queryParams.code as string);
-             if (pkceError) {
-               setError(getFriendlyErrorMessage(pkceError) || "Invalid or expired reset link. Please request a new one.");
-             }
-             return; // handled by PKCE
-          }
-        }
-        
-        if (access_token && refresh_token) {
-          const { error: sessionError } = await supabase.auth.setSession({
-            access_token,
-            refresh_token
-          });
-          if (sessionError) {
-            setError(getFriendlyErrorMessage(sessionError) || "Session expired or invalid link. Please try again.");
-          }
-        }
+  // Security: if the user leaves this screen without completing the reset,
+  // sign them out so the temporary session doesn't persist.
+  useEffect(() => {
+    return () => {
+      if (!sessionCreated.current) {
+        supabase.auth.signOut();
       }
     };
-    handleUrl();
-  }, [url]);
+  }, []);
+
+  const hasAttemptedExchange = React.useRef(false);
+
+  useEffect(() => {
+    // Use either the dynamically updated URL or the one we manually caught on cold start
+    const activeUrl = url || initialUrl;
+
+    // CRITICAL: Don't attempt exchange if we have no URL at all yet
+    // This prevents the ref from latching prematurely before the URL arrives
+    if (!activeUrl && !code && !error_description) return;
+
+    const exchangeToken = async () => {
+      if (hasAttemptedExchange.current) return;
+
+      // Parse the hash fragment from the active URL - Supabase sends ALL params here
+      // including errors, access_token, and error_description
+      const hashPart = activeUrl?.split('#')[1] || '';
+      const hashParams = new URLSearchParams(hashPart);
+      const hashError = hashParams.get('error_description') || hashParams.get('error');
+      const access_token = hashParams.get('access_token');
+      const refresh_token = hashParams.get('refresh_token');
+
+      // 1. Check for Supabase error redirects (from both query params AND hash)
+      const anyError = error_description || hashError;
+      if (anyError && !access_token) {
+        hasAttemptedExchange.current = true;
+        setError(anyError.replace(/\+/g, ' '));
+        return;
+      }
+
+      // 2. PKCE Flow — code comes in as query param
+      if (code) {
+        hasAttemptedExchange.current = true;
+        const { error: pkceError } = await supabase.auth.exchangeCodeForSession(code);
+        if (pkceError) {
+          setError(getFriendlyErrorMessage(pkceError) || "Invalid or expired reset link. Please request a new one.");
+        } else {
+          sessionCreated.current = true;
+        }
+        return;
+      }
+
+      // 3. Implicit Flow — access_token comes in hash fragment
+      if (access_token && refresh_token) {
+        hasAttemptedExchange.current = true;
+        const { error: sessionError } = await supabase.auth.setSession({
+          access_token,
+          refresh_token
+        });
+        if (sessionError) {
+          setError(getFriendlyErrorMessage(sessionError) || "Session expired or invalid link. Please try again.");
+        } else {
+          sessionCreated.current = true;
+        }
+        return;
+      }
+    };
+
+    exchangeToken();
+  }, [code, error_description, url, initialUrl]);
 
   const handleReset = async () => {
     if (!password.trim() || !confirmPassword.trim()) {

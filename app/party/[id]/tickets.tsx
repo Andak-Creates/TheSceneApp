@@ -11,7 +11,9 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { usePaystack } from "react-native-paystack-webview";
+import { PaystackProvider, usePaystack } from "react-native-paystack-webview";
+
+const PAYSTACK_PUBLIC_KEY = process.env.EXPO_PUBLIC_PAYSTACK_PUBLIC_KEY ?? '';
 import { supabase } from "../../../lib/supabase";
 import { useAuthStore } from "../../../stores/authStore";
 
@@ -36,6 +38,7 @@ interface Party {
     thumbnail_url: string | null;
     is_primary: boolean;
   }[];
+  show_ticket_count?: boolean;
 }
 
 interface TicketTier {
@@ -55,6 +58,14 @@ const APP_FEE_PERCENTAGE = 0.05;
 const PAYSTACK_CURRENCIES = ["NGN", "GHS", "USD", "ZAR", "KES", "XOF"];
 
 export default function TicketPurchaseScreen() {
+  return (
+    <PaystackProvider publicKey={PAYSTACK_PUBLIC_KEY}>
+      <InnerTicketPurchaseScreen />
+    </PaystackProvider>
+  );
+}
+
+function InnerTicketPurchaseScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { user } = useAuthStore();
@@ -135,7 +146,8 @@ export default function TicketPurchaseScreen() {
 
       setTicketTiers(tiers);
       if (tiers.length > 0) {
-        setSelectedTier(tiers[0].id);
+        const firstAvailable = tiers.find((t) => t.available > 0);
+        setSelectedTier(firstAvailable ? firstAvailable.id : tiers[0].id);
       }
     } catch (error) {
       console.error("Error fetching party:", error);
@@ -157,7 +169,10 @@ export default function TicketPurchaseScreen() {
     }
     const maxLimit = tier.max_per_order ?? 999999;
     if (quantity > maxLimit) {
-      Alert.alert("Error", `Max ${tier.max_per_order} tickets per order for this tier`);
+      Alert.alert(
+        "Error",
+        `Max ${tier.max_per_order} tickets per order for this tier`,
+      );
       return;
     }
 
@@ -192,7 +207,6 @@ export default function TicketPurchaseScreen() {
 
     // Handle Free Tickets (0 Naira/Currency)
     if (totalPrice === 0) {
-      setPurchasing(true);
       try {
         await handlePaymentSuccess("FREE_TICKET_" + Date.now());
         return;
@@ -202,6 +216,31 @@ export default function TicketPurchaseScreen() {
         Alert.alert("Error", "Failed to process free ticket.");
         return;
       }
+    }
+
+    // PRE-RESERVE capacity BEFORE opening Paystack.
+    // This prevents two users from both paying for the last ticket simultaneously.
+    const { data: capacityResult, error: capacityError } = await supabase.rpc(
+      "purchase_tickets_atomic",
+      {
+        p_tier_id: selectedTier,
+        p_quantity: quantity,
+      },
+    );
+
+    if (capacityError || !capacityResult?.success) {
+      const errReason =
+        capacityResult?.error || capacityError?.message || "Unknown error";
+      let errMsg = "These tickets are no longer available.";
+      if (errReason === "sold_out") {
+        errMsg = "Sorry, these tickets just sold out!";
+      } else if (errReason === "exceeds_limit") {
+        errMsg = `Max ${capacityResult.max} tickets per order for this tier.`;
+      }
+      setPurchasing(false);
+      Alert.alert("Cannot Reserve Tickets", errMsg);
+      await fetchPartyAndTickets(); // refresh UI to show updated availability
+      return;
     }
 
     try {
@@ -239,22 +278,40 @@ export default function TicketPurchaseScreen() {
           const ref = res.transactionRef || res.transaction || res.trans || "";
           await handlePaymentSuccess(ref);
         },
-        onCancel: () => {
+        onCancel: async () => {
+          // Release the pre-reserved capacity since user cancelled
+          await supabase.rpc('release_tickets_atomic', {
+            p_tier_id: selectedTier,
+            p_quantity: quantity,
+          });
           setPurchasing(false);
           pendingPurchase.current = null;
           Alert.alert("Cancelled", "Your ticket purchase was cancelled.");
         },
-        onError: (error: any) => {
+        onError: async (error: any) => {
+          // Release the pre-reserved capacity since payment failed
+          await supabase.rpc('release_tickets_atomic', {
+            p_tier_id: selectedTier,
+            p_quantity: quantity,
+          });
           setPurchasing(false);
           pendingPurchase.current = null;
           console.error("Paystack checkout error:", error);
-          Alert.alert("Error", "Could not open payment gateway. Please try again.");
+          Alert.alert(
+            "Error",
+            "Could not open payment gateway. Please try again.",
+          );
         },
         onClose: () => {
           setPurchasing(false);
         },
       } as any);
     } catch (error) {
+      // Release pre-reserved capacity if popup itself fails to open
+      await supabase.rpc('release_tickets_atomic', {
+        p_tier_id: selectedTier,
+        p_quantity: quantity,
+      });
       console.error("Paystack initiation error:", error);
       setPurchasing(false);
       pendingPurchase.current = null;
@@ -270,27 +327,8 @@ export default function TicketPurchaseScreen() {
     }
 
     try {
-      // BEFORE inserting the ticket, check capacity atomically
-      const { data: capacityResult, error: capacityError } = await supabase.rpc('purchase_tickets_atomic', {
-        p_tier_id: purchase.tierId,
-        p_quantity: purchase.quantity,
-      });
-
-      if (capacityError || !capacityResult?.success) {
-        const errReason = capacityResult?.error || capacityError?.message || "Unknown error";
-        let errMsg = "Failed to reserve tickets.";
-        
-        if (errReason === 'sold_out') {
-          errMsg = "Sorry, these tickets are sold out.";
-        } else if (errReason === 'exceeds_limit') {
-          errMsg = `Max ${capacityResult.max} tickets per order for this tier.`;
-        }
-        
-        setPurchasing(false);
-        Alert.alert("Transaction Failed", errMsg + "\nIf you were charged, please contact support with reference: " + reference);
-        return;
-      }
-
+      // Capacity was already reserved in handlePurchase before opening Paystack.
+      // Just insert the ticket directly.
       const { data: ticketData, error: ticketError } = await supabase
         .from("tickets")
         .insert({
@@ -308,7 +346,14 @@ export default function TicketPurchaseScreen() {
         .select()
         .single();
 
-      if (ticketError) throw ticketError;
+      if (ticketError) {
+        // Compensate — release the capacity we reserved since the insert failed
+        await supabase.rpc('release_tickets_atomic', {
+          p_tier_id: purchase.tierId,
+          p_quantity: purchase.quantity,
+        });
+        throw ticketError;
+      }
 
       // Record earnings for the host
       const { error: earningsError } = await supabase
@@ -349,7 +394,8 @@ export default function TicketPurchaseScreen() {
       if (isFree) {
         Alert.alert(
           "Ticket Creation Failed",
-          "We had trouble creating your ticket. Please try again or contact support with reference: " + reference,
+          "We had trouble creating your ticket. Please try again or contact support with reference: " +
+            reference,
         );
       } else {
         Alert.alert(
@@ -457,14 +503,23 @@ export default function TicketPurchaseScreen() {
             {(() => {
               let imageSource = null;
               if (party.media && party.media.length > 0) {
-                const primary = party.media.find((m: any) => m.is_primary) || party.media[0];
+                const primary =
+                  party.media.find((m: any) => m.is_primary) || party.media[0];
                 const isVideo = (url: string) => {
-                  const lower = url.toLowerCase().split('?')[0];
-                  return lower.endsWith('.mp4') || lower.endsWith('.mov') || lower.endsWith('.webm');
+                  const lower = url.toLowerCase().split("?")[0];
+                  return (
+                    lower.endsWith(".mp4") ||
+                    lower.endsWith(".mov") ||
+                    lower.endsWith(".webm")
+                  );
                 };
-                
-                if (primary.media_type === 'video' || isVideo(primary.media_url)) {
-                  imageSource = (primary as any).thumbnail_url || primary.media_url;
+
+                if (
+                  primary.media_type === "video" ||
+                  isVideo(primary.media_url)
+                ) {
+                  imageSource =
+                    (primary as any).thumbnail_url || primary.media_url;
                 } else {
                   imageSource = primary.media_url;
                 }
@@ -544,17 +599,15 @@ export default function TicketPurchaseScreen() {
                   {tier.price.toLocaleString()}
                 </Text>
               </View>
-              <Text
-                className={
-                  tier.available === 0
-                    ? "text-red-400 text-sm"
-                    : "text-gray-400 text-sm"
-                }
-              >
-                {tier.available === 0
-                  ? "Sold Out"
-                  : `${tier.available} ticket${tier.available !== 1 ? "s" : ""} available`}
-              </Text>
+              {tier.available === 0 ? (
+                <Text className="text-red-400 text-sm font-semibold">Sold Out</Text>
+              ) : party?.show_ticket_count ? (
+                <Text className="text-gray-400 text-sm">
+                  {tier.available} ticket{tier.available !== 1 ? "s" : ""} available
+                </Text>
+              ) : (
+                <Text className="text-gray-400 text-sm font-semibold">Available</Text>
+              )}
             </TouchableOpacity>
           ))}
 
@@ -589,17 +642,29 @@ export default function TicketPurchaseScreen() {
                 <TouchableOpacity
                   onPress={() =>
                     setQuantity(
-                      Math.min(selectedTierData.available, selectedTierData.max_per_order ?? 999999, quantity + 1),
+                      Math.min(
+                        selectedTierData.available,
+                        selectedTierData.max_per_order ?? 999999,
+                        quantity + 1,
+                      ),
                     )
                   }
                   className="w-10 h-10 rounded-full bg-white/10 items-center justify-center"
-                  disabled={quantity >= selectedTierData.available || (selectedTierData.max_per_order && quantity >= selectedTierData.max_per_order)}
+                  disabled={
+                    quantity >= selectedTierData.available ||
+                    (selectedTierData.max_per_order &&
+                      quantity >= selectedTierData.max_per_order)
+                  }
                 >
                   <Ionicons
                     name="add"
                     size={20}
                     color={
-                      quantity >= selectedTierData.available || (selectedTierData.max_per_order && quantity >= selectedTierData.max_per_order) ? "#666" : "#fff"
+                      quantity >= selectedTierData.available ||
+                      (selectedTierData.max_per_order &&
+                        quantity >= selectedTierData.max_per_order)
+                        ? "#666"
+                        : "#fff"
                     }
                   />
                 </TouchableOpacity>

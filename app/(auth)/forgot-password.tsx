@@ -39,7 +39,7 @@ export default function ForgotPasswordScreen() {
 
     try {
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: "https://thesceneapp.online/reset-password",
+        redirectTo: "thescene://reset-password",
       });
       if (resetError) throw resetError;
       setSent(true);

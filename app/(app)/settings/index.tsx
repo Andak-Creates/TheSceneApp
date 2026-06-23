@@ -275,6 +275,22 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Administration */}
+        {profile?.is_admin && (
+          <View className="mb-8">
+            <Text className="text-gray-500 text-xs font-bold uppercase tracking-widest mb-2 ml-1">
+              Administration
+            </Text>
+            <View className="bg-[#150d1e] rounded-3xl px-4 border border-white/5">
+              <SettingItem
+                icon="shield-checkmark"
+                label="Admin Console"
+                onPress={() => router.push("/admin-console")}
+              />
+            </View>
+          </View>
+        )}
+
         {/* Preferences */}
         <View className="mb-8">
           <Text className="text-gray-500 text-xs font-bold uppercase tracking-widest mb-2 ml-1">

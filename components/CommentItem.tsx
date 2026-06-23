@@ -297,9 +297,6 @@ export default function CommentItem({
               <TouchableOpacity onPress={handleProfileTap}>
                 <View className="flex-row items-center gap-1">
                   <Text className="font-semibold text-white">{displayName}</Text>
-                  {isVerified && (
-                    <Ionicons name="checkmark-circle" size={12} color="#a855f7" />
-                  )}
                   {isHost && (
                     <View className="bg-purple-600/20 px-1.5 py-0.5 rounded-full">
                       <Text className="text-purple-400 text-[9px] font-bold">

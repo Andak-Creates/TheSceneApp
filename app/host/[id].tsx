@@ -407,9 +407,6 @@ export default function HostProfileScreen() {
               <Text className="text-white text-2xl font-bold">
                 {profile.name}
               </Text>
-              {profile.is_verified && (
-                <Ionicons name="checkmark-circle" size={15} color="#a855f7" />
-              )}
             </View>
             {profile.owner?.username && (
               <Text className="text-gray-400 text-base">

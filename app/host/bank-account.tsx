@@ -239,9 +239,12 @@ export default function BankAccountScreen() {
               placeholderTextColor="#666"
               autoCapitalize="characters"
             />
-            <Text className="text-gray-600 text-xs ml-1 mt-1">
-              Must match exactly what your bank has on file.
-            </Text>
+            <View className="mt-2 bg-orange-500/10 border border-orange-500/20 rounded-lg p-3 flex-row gap-2">
+              <Ionicons name="warning" size={16} color="#f97316" />
+              <Text className="text-orange-400 text-xs flex-1">
+                Your withdrawal might be denied if this account name does not exactly match the Full Name provided in your Host Verification.
+              </Text>
+            </View>
           </View>
         </View>
 

@@ -88,6 +88,7 @@ interface Party {
   }[];
   has_ticket?: boolean;
   has_reviewed?: boolean;
+  show_ticket_count?: boolean;
 }
 
 interface TicketTier {
@@ -189,6 +190,9 @@ export default function PartyDetailScreen() {
   const [editTierLimitOn, setEditTierLimitOn] = useState(true);
   const [newTierMaxPerOrder, setNewTierMaxPerOrder] = useState("2");
   const [newTierLimitOn, setNewTierLimitOn] = useState(true);
+
+  // Ticket count visibility toggle
+  const [showTicketCount, setShowTicketCount] = useState(true);
 
   const recordPartyView = async () => {
     if (!partyId || viewRecorded.current) return;
@@ -362,9 +366,34 @@ export default function PartyDetailScreen() {
   const minPrice = tiersQuery.data?.minPrice ?? 0;
   const currencySymbol = getCurrencySymbol(party?.currency_code || "NGN");
 
+  // Sync showTicketCount from DB whenever party data loads/changes
+  useEffect(() => {
+    if (party) {
+      setShowTicketCount(party.show_ticket_count ?? true);
+    }
+  }, [party?.show_ticket_count]);
+
   const invalidateParty = () => {
     queryClient.invalidateQueries({ queryKey: queryKeys.partyDetail(partyId) });
     queryClient.invalidateQueries({ queryKey: queryKeys.partyTiers(partyId) });
+  };
+
+  const handleToggleShowTicketCount = async (value: boolean) => {
+    setShowTicketCount(value); // optimistic
+    try {
+      const { error } = await supabase
+        .from("parties")
+        .update({ show_ticket_count: value })
+        .eq("id", partyId);
+      if (error) throw error;
+      queryClient.setQueryData(
+        queryKeys.partyDetail(partyId),
+        (old: Party | undefined) => old ? { ...old, show_ticket_count: value } : old,
+      );
+    } catch (e) {
+      setShowTicketCount(!value); // revert on failure
+      Alert.alert("Error", "Failed to update setting.");
+    }
   };
 
   const handleRestockTier = async (tierId: string, currentQuantity: number) => {
@@ -418,7 +447,7 @@ export default function PartyDetailScreen() {
       return;
     }
 
-    const price = parseFloat(editTierPrice);
+    const price = parseFloat(editTierPrice.replace(/,/g, ""));
     if (isNaN(price)) {
       Alert.alert("Error", "Please enter a valid price");
       return;
@@ -502,7 +531,7 @@ export default function PartyDetailScreen() {
       return;
     }
 
-    const price = parseFloat(newTierPrice);
+    const price = parseFloat(newTierPrice.replace(/,/g, ""));
     const quantity = parseInt(newTierQuantity);
 
     if (isNaN(price) || isNaN(quantity) || quantity <= 0) {
@@ -1497,9 +1526,19 @@ export default function PartyDetailScreen() {
                 {`${ticketTiers.length > 1 ? "From " : ""}${currencySymbol}${displayPrice?.toLocaleString() ?? "0"}`}
               </Text>
             </View>
-            <Text className="text-gray-400 text-sm">
-              {ticketsRemaining} of {totalTickets} available
-            </Text>
+            {showTicketCount && ticketsRemaining > 0 ? (
+              <Text className="text-gray-400 text-sm">
+                {ticketsRemaining} of {totalTickets} available
+              </Text>
+            ) : ticketsRemaining <= 0 ? (
+              <Text className="text-red-400 text-sm font-semibold">
+                Sold Out
+              </Text>
+            ) : (
+              <Text className="text-gray-400 text-sm font-semibold">
+                Available
+              </Text>
+            )}
 
             {/* ✅ SHOW TIER BREAKDOWN IF MULTIPLE TIERS AND NOT TBA */}
             {ticketTiers.length > 1 && (
@@ -1510,9 +1549,15 @@ export default function PartyDetailScreen() {
                     className="flex-row justify-between items-center py-1"
                   >
                     <Text className="text-gray-400 text-xs">{tier.name}</Text>
-                    <Text className="text-gray-400 text-xs">
-                      {tier.quantity - tier.quantity_sold}/{tier.quantity} left
-                    </Text>
+                    {tier.quantity - tier.quantity_sold <= 0 ? (
+                      <Text className="text-red-400 text-xs font-semibold">Sold Out</Text>
+                    ) : showTicketCount ? (
+                      <Text className="text-gray-400 text-xs">
+                        {tier.quantity - tier.quantity_sold}/{tier.quantity} left
+                      </Text>
+                    ) : (
+                      <Text className="text-gray-400 text-xs font-semibold">Available</Text>
+                    )}
                   </View>
                 ))}
               </View>
@@ -1684,6 +1729,26 @@ export default function PartyDetailScreen() {
             </View>
 
             <ScrollView className="flex-1 p-6">
+              {/* Ticket Settings */}
+              <View className="bg-white/5 rounded-2xl p-4 mb-6 border border-white/5">
+                <View className="flex-row justify-between items-center">
+                  <View className="flex-1 mr-4">
+                    <Text className="text-white font-bold text-base mb-1">
+                      Show Ticket Quantities
+                    </Text>
+                    <Text className="text-gray-400 text-xs">
+                      When turned off, attendees only see "Sold Out" instead of how many tickets remain.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={showTicketCount}
+                    onValueChange={handleToggleShowTicketCount}
+                    trackColor={{ false: "#333", true: "#a855f7" }}
+                    thumbColor="#fff"
+                  />
+                </View>
+              </View>
+
               {/* Existing Tiers Section */}
               <Text className="text-purple-400 text-xs font-bold uppercase tracking-widest mb-4">
                 Restock Existing Tiers

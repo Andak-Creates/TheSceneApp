@@ -30,7 +30,6 @@ export default function HostVerificationScreen() {
   const { user } = useAuthStore();
   const { profile } = useUserStore();
   const { from } = useLocalSearchParams<{ from?: string }>();
-  const fromCreateParty = from === "createParty";
 
   const [status, setStatus] = useState<VerificationStatus>("idle");
   const [loading, setLoading] = useState(true);
@@ -38,6 +37,7 @@ export default function HostVerificationScreen() {
   const [fullName, setFullName] = useState("");
   const [idType, setIdType] = useState("");
   const [idImageUri, setIdImageUri] = useState<string | null>(null);
+  const [utilityBillUri, setUtilityBillUri] = useState<string | null>(null);
   const [address, setAddress] = useState("");
   const [phone, setPhone] = useState("");
   const [rejectionReason, setRejectionReason] = useState<string | null>(null);
@@ -88,6 +88,7 @@ export default function HostVerificationScreen() {
         setFullName(verificationData.full_name || profile?.full_name || "");
         setIdType(verificationData.id_type || "");
         setIdImageUri(verificationData.id_image_url || null);
+        setUtilityBillUri(verificationData.utility_bill_url || null);
         setAddress(verificationData.address || "");
         setPhone(verificationData.phone || "");
         setRejectionReason(verificationData.rejection_reason || null);
@@ -101,7 +102,7 @@ export default function HostVerificationScreen() {
     }
   };
 
-  const pickIdImage = async () => {
+  const pickImage = async (setter: (uri: string) => void) => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
       Alert.alert(
@@ -112,12 +113,11 @@ export default function HostVerificationScreen() {
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [3, 2],
+      allowsEditing: false,
       quality: 0.7,
     });
     if (!result.canceled) {
-      setIdImageUri(result.assets[0].uri);
+      setter(result.assets[0].uri);
     }
   };
 
@@ -154,20 +154,25 @@ export default function HostVerificationScreen() {
       !fullName.trim() ||
       !idType.trim() ||
       !idImageUri ||
+      !utilityBillUri ||
       !address.trim() ||
       !phone.trim()
     ) {
-      setError("Please fill in all fields and upload your ID");
+      setError("Please fill in all fields, upload your ID photo, and upload a utility bill");
       return;
     }
     setSubmitting(true);
     setError("");
     try {
       // 1. Upload ID Image
-      const idImageUrl = idImageUri.startsWith('http') 
-        ? idImageUri 
+      const idImageUrl = idImageUri.startsWith("http")
+        ? idImageUri
         : await uploadVerificationImage(idImageUri, "id");
-    
+
+      // 2. Upload Utility Bill
+      const utilityBillUrl = utilityBillUri.startsWith("http")
+        ? utilityBillUri
+        : await uploadVerificationImage(utilityBillUri, "utility_bill");
 
       const { error: upsertError } = await supabase
         .from("host_verifications")
@@ -177,6 +182,7 @@ export default function HostVerificationScreen() {
             full_name: fullName.trim(),
             id_type: idType.trim(),
             id_image_url: idImageUrl,
+            utility_bill_url: utilityBillUrl,
             address: address.trim(),
             phone: phone.trim(),
             status: "pending",
@@ -187,7 +193,6 @@ export default function HostVerificationScreen() {
 
       if (upsertError) {
         console.error("Verification upsert error:", upsertError);
-        // Specifically look for RLS policy violations
         if (
           upsertError.code === "42501" ||
           upsertError.message?.includes("row level security")
@@ -200,7 +205,7 @@ export default function HostVerificationScreen() {
       }
 
       setStatus("pending");
-      
+
       // Notify Admins (Push)
       notifyAdmins(
         "🛡️ New Host Verification",
@@ -209,8 +214,8 @@ export default function HostVerificationScreen() {
       );
 
       Alert.alert(
-        "Submitted",
-        "Your verification has been submitted. We'll review it and notify you. You can create parties once approved.",
+        "Submitted ✓",
+        "Your verification has been submitted. We'll review it shortly and notify you. You can host events once approved.",
         [{ text: "OK", onPress: () => router.back() }],
       );
     } catch (e: any) {
@@ -234,26 +239,17 @@ export default function HostVerificationScreen() {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       className="flex-1 bg-[#09030e]"
     >
-      <View className="pt-16 px-6 pb-6 border-b border-white/5">
-        <View className="flex-row items-center justify-between">
-          <TouchableOpacity
-            onPress={() => router.back()}
-            className="w-10 h-10 mb-4"
-          >
-            <Ionicons name="arrow-back" size={24} color="#fff" />
-          </TouchableOpacity>
-          {fromCreateParty && (
-            <TouchableOpacity
-              onPress={() => router.replace("/(app)/createParty")}
-              className="mb-4 px-4 py-2 rounded-full bg-white/5 border border-white/10"
-            >
-              <Text className="text-gray-400 text-sm font-semibold">Skip for now</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+      {/* Header */}
+      <View className="pt-16 px-6 pb-5 border-b border-white/5">
+        <TouchableOpacity
+          onPress={() => router.back()}
+          className="w-10 h-10 mb-4 rounded-full bg-white/5 items-center justify-center"
+        >
+          <Ionicons name="arrow-back" size={22} color="#fff" />
+        </TouchableOpacity>
         <Text className="text-white text-2xl font-bold">Host Verification</Text>
         <Text className="text-gray-400 text-sm mt-1">
-          Verify your identity to create and host parties on the platform.
+          All hosts must complete verification before creating or hosting any events.
         </Text>
       </View>
 
@@ -261,36 +257,54 @@ export default function HostVerificationScreen() {
         className="flex-1 px-6 pt-6"
         showsVerticalScrollIndicator={false}
       >
+        {/* Mandatory notice */}
+        {status === "not_submitted" && (
+          <View className="bg-purple-500/10 border border-purple-500/25 rounded-2xl p-4 mb-6 flex-row items-start gap-3">
+            <Ionicons name="shield-checkmark" size={20} color="#a855f7" />
+            <View className="flex-1">
+              <Text className="text-purple-300 font-semibold text-sm">Verification Required</Text>
+              <Text className="text-gray-400 text-xs mt-1 leading-relaxed">
+                This is mandatory for all hosts. Your full name here must match the name on your withdrawal bank account.
+              </Text>
+            </View>
+          </View>
+        )}
+
         {status === "pending" && (
           <View className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 mb-6">
-            <Text className="text-amber-400 font-semibold">
-              Verification pending
-            </Text>
+            <View className="flex-row items-center gap-2 mb-1">
+              <Ionicons name="time" size={18} color="#f59e0b" />
+              <Text className="text-amber-400 font-semibold">
+                Verification Under Review
+              </Text>
+            </View>
             <Text className="text-gray-300 text-sm mt-1">
-              Your verification is under review. You'll be able to create
-              parties once approved.
+              Your verification is being reviewed. You'll be notified once approved and can start hosting events.
             </Text>
             <TouchableOpacity
               onPress={() => router.back()}
               className="mt-4 py-2"
             >
-              <Text className="text-purple-400 font-semibold">Back</Text>
+              <Text className="text-purple-400 font-semibold">← Go Back</Text>
             </TouchableOpacity>
           </View>
         )}
 
         {status === "rejected" && (
           <View className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 mb-6">
-            <Text className="text-red-400 font-semibold">
-              Verification rejected
-            </Text>
+            <View className="flex-row items-center gap-2 mb-1">
+              <Ionicons name="close-circle" size={18} color="#ef4444" />
+              <Text className="text-red-400 font-semibold">
+                Verification Rejected
+              </Text>
+            </View>
             {rejectionReason && (
               <Text className="text-gray-300 text-sm mt-1">
                 Reason: {rejectionReason}
               </Text>
             )}
             <Text className="text-gray-400 text-sm mt-2">
-              You may resubmit with correct information.
+              Please resubmit with the correct information below.
             </Text>
           </View>
         )}
@@ -303,8 +317,12 @@ export default function HostVerificationScreen() {
               </View>
             ) : null}
 
-            <View className="mb-4">
-              <Text className="text-white font-semibold mb-2">Full name *</Text>
+            {/* Full Name */}
+            <View className="mb-5">
+              <Text className="text-white font-semibold mb-1">Full Legal Name *</Text>
+              <Text className="text-gray-500 text-xs mb-2">
+                Must match the name on your withdrawal bank account exactly.
+              </Text>
               <TextInput
                 className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white"
                 placeholder="Your full legal name"
@@ -313,8 +331,10 @@ export default function HostVerificationScreen() {
                 onChangeText={setFullName}
               />
             </View>
-            <View className="mb-4">
-              <Text className="text-white font-semibold mb-2">ID type *</Text>
+
+            {/* ID Type */}
+            <View className="mb-5">
+              <Text className="text-white font-semibold mb-2">ID Type *</Text>
               <View className="flex-row flex-wrap gap-2">
                 {[
                   "National ID",
@@ -344,40 +364,85 @@ export default function HostVerificationScreen() {
               </View>
             </View>
 
-            <View className="mb-4">
-              <Text className="text-white font-semibold mb-2">ID photo *</Text>
+            {/* ID Photo */}
+            <View className="mb-5">
+              <Text className="text-white font-semibold mb-1">ID Photo *</Text>
+              <Text className="text-gray-500 text-xs mb-2">
+                A clear photo of your selected government-issued ID.
+              </Text>
               <TouchableOpacity
-                onPress={pickIdImage}
-                className="bg-white/10 border border-white/20 rounded-xl p-4 items-center justify-center min-h-[120]"
+                onPress={() => pickImage(setIdImageUri)}
+                className="bg-white/10 border border-white/20 rounded-xl p-4 items-center justify-center min-h-[110]"
               >
                 {idImageUri ? (
-                  <Image
-                    source={{ uri: idImageUri.startsWith('http') ? supabase.storage.from('flyers').getPublicUrl(idImageUri).data.publicUrl : idImageUri }}
-                    className="w-full h-32 rounded-lg"
-                  />
+                  <View className="w-full">
+                    <Image
+                      source={{ uri: idImageUri.startsWith("http") ? supabase.storage.from("flyers").getPublicUrl(idImageUri).data.publicUrl : idImageUri }}
+                      className="w-full h-32 rounded-lg"
+                      resizeMode="cover"
+                    />
+                    <View className="flex-row items-center justify-center mt-2 gap-1">
+                      <Ionicons name="checkmark-circle" size={14} color="#22c55e" />
+                      <Text className="text-green-400 text-xs font-semibold">ID uploaded — tap to change</Text>
+                    </View>
+                  </View>
                 ) : (
                   <>
-                    <Ionicons name="card-outline" size={40} color="#666" />
-                    <Text className="text-gray-400 mt-2">
-                      Tap to upload ID photo
-                    </Text>
+                    <Ionicons name="card-outline" size={36} color="#666" />
+                    <Text className="text-gray-400 mt-2 text-sm">Tap to upload ID photo</Text>
                   </>
                 )}
               </TouchableOpacity>
             </View>
 
-            <View className="mb-4">
-              <Text className="text-white font-semibold mb-2">Address *</Text>
+            {/* Utility Bill */}
+            <View className="mb-5">
+              <Text className="text-white font-semibold mb-1">Utility Bill *</Text>
+              <Text className="text-gray-500 text-xs mb-2">
+                A recent utility bill (electricity, water, etc.) showing your name and address.
+              </Text>
+              <TouchableOpacity
+                onPress={() => pickImage(setUtilityBillUri)}
+                className="bg-white/10 border border-white/20 rounded-xl p-4 items-center justify-center min-h-[110]"
+              >
+                {utilityBillUri ? (
+                  <View className="w-full">
+                    <Image
+                      source={{ uri: utilityBillUri.startsWith("http") ? supabase.storage.from("flyers").getPublicUrl(utilityBillUri).data.publicUrl : utilityBillUri }}
+                      className="w-full h-56 rounded-lg"
+                      resizeMode="contain"
+                    />
+                    <View className="flex-row items-center justify-center mt-2 gap-1">
+                      <Ionicons name="checkmark-circle" size={14} color="#22c55e" />
+                      <Text className="text-green-400 text-xs font-semibold">Utility bill uploaded — tap to change</Text>
+                    </View>
+                  </View>
+                ) : (
+                  <>
+                    <Ionicons name="document-text-outline" size={36} color="#666" />
+                    <Text className="text-gray-400 mt-2 text-sm">Tap to upload utility bill</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {/* Address */}
+            <View className="mb-5">
+              <Text className="text-white font-semibold mb-2">Home Address *</Text>
               <TextInput
                 className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white"
-                placeholder="Your address"
+                placeholder="Your residential address"
                 placeholderTextColor="#666"
                 value={address}
                 onChangeText={setAddress}
+                multiline
+                numberOfLines={2}
               />
             </View>
+
+            {/* Phone */}
             <View className="mb-6">
-              <Text className="text-white font-semibold mb-2">Phone *</Text>
+              <Text className="text-white font-semibold mb-2">Phone Number *</Text>
               <TextInput
                 className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white"
                 placeholder="Your phone number"
@@ -387,27 +452,54 @@ export default function HostVerificationScreen() {
                 keyboardType="phone-pad"
               />
             </View>
+
+            {/* Progress indicator */}
+            <View className="bg-white/5 border border-white/10 rounded-xl p-4 mb-6">
+              <Text className="text-gray-400 text-xs font-semibold mb-3 uppercase">Checklist</Text>
+              {[
+                { label: "Full legal name", done: fullName.trim().length > 2 },
+                { label: "ID type selected", done: !!idType },
+                { label: "ID photo uploaded", done: !!idImageUri },
+                { label: "Utility bill uploaded", done: !!utilityBillUri },
+                { label: "Home address", done: address.trim().length > 5 },
+                { label: "Phone number", done: phone.trim().length === 11, error: phone.trim().length > 11 },
+              ].map((item) => (
+                <View key={item.label} className="flex-row items-center gap-2 mb-1.5">
+                  <Ionicons
+                    name={item.error ? "close-circle" : item.done ? "checkmark-circle" : "ellipse-outline"}
+                    size={14}
+                    color={item.error ? "#ef4444" : item.done ? "#22c55e" : "#555"}
+                  />
+                  <Text className={`text-xs ${item.error ? "text-red-400" : item.done ? "text-green-400" : "text-gray-500"}`}>
+                    {item.label}
+                  </Text>
+                </View>
+              ))}
+            </View>
+
             <TouchableOpacity
               onPress={handleSubmit}
               disabled={submitting}
-              className="bg-purple-600 py-4 rounded-2xl items-center mb-4"
+              className="bg-purple-600 py-4 rounded-2xl items-center mb-10"
+              style={{
+                shadowColor: "#a855f7",
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.35,
+                shadowRadius: 10,
+                elevation: 8,
+              }}
             >
               {submitting ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text className="text-white font-bold text-base">
-                  Submit for Verification
-                </Text>
+                <View className="flex-row items-center gap-2">
+                  <Ionicons name="shield-checkmark" size={18} color="#fff" />
+                  <Text className="text-white font-bold text-base">
+                    Submit for Verification
+                  </Text>
+                </View>
               )}
             </TouchableOpacity>
-            {fromCreateParty && (
-              <TouchableOpacity
-                onPress={() => router.replace("/(app)/createParty")}
-                className="py-3 items-center mb-6"
-              >
-                <Text className="text-gray-500 text-sm">I'll do this later</Text>
-              </TouchableOpacity>
-            )}
           </>
         )}
       </ScrollView>

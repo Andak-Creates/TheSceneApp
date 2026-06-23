@@ -303,6 +303,17 @@ export default function FeedScreen() {
   // No manual useEffect needed — useInfiniteQuery fetches automatically on mount
 
   const [activePartyId, setActivePartyId] = useState<string | null>(null);
+  const flatListRef = useRef<FlatList>(null);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+
+  const handleScroll = useCallback((event: any) => {
+    const offsetY = event.nativeEvent.contentOffset.y;
+    setShowScrollTop(offsetY > 500); // Show button after scrolling down 500px
+  }, []);
+
+  const scrollToTop = useCallback(() => {
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+  }, []);
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
@@ -364,10 +375,13 @@ export default function FeedScreen() {
       </View>
 
       <FlatList
+        ref={flatListRef}
         data={parties}
         renderItem={renderItem}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
         keyExtractor={(item) => item.id}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 100 }}
@@ -387,6 +401,23 @@ export default function FeedScreen() {
           </View>
         }
       />
+
+      {/* Back to Top Button */}
+      {showScrollTop && (
+        <TouchableOpacity
+          onPress={scrollToTop}
+          className="absolute bottom-8 right-6 bg-purple-600 w-12 h-12 rounded-full items-center justify-center border border-purple-400/50"
+          style={{
+            shadowColor: "#a855f7",
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.35,
+            shadowRadius: 10,
+            elevation: 8,
+          }}
+        >
+          <Ionicons name="arrow-up" size={24} color="#fff" />
+        </TouchableOpacity>
+      )}
     </View>
   );
 }

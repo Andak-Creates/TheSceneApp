@@ -83,12 +83,12 @@ interface MediaItem {
 }
 
 const safeParseFloat = (value: string): number => {
-  const parsed = parseFloat(value);
+  const parsed = parseFloat(value.replace(/,/g, ""));
   return isNaN(parsed) ? 0 : parsed;
 };
 
 const safeParseInt = (value: string): number => {
-  const parsed = parseInt(value, 10);
+  const parsed = parseInt(value.replace(/,/g, ""), 10);
   return isNaN(parsed) ? 0 : parsed;
 };
 
@@ -304,6 +304,7 @@ export default function CreatePartyScreen() {
     setTicketTiers([
       { id: "1", name: "General Admission", price: "", quantity: "", maxPerOrder: "2", isLimitOn: true },
     ]);
+    setShowTicketCount(true);
 
     let prefCurr = "NGN";
     if (user?.id) {
@@ -367,6 +368,7 @@ export default function CreatePartyScreen() {
     { id: "1", name: "General Admission", price: "", quantity: "", maxPerOrder: "2", isLimitOn: true },
   ]);
   const [currency, setCurrency] = useState("NGN");
+  const [showTicketCount, setShowTicketCount] = useState(true);
   const [error, setError] = useState("");
 
   const toggleGenre = (genre: string) => {
@@ -551,6 +553,7 @@ export default function CreatePartyScreen() {
           vibes: selectedVibes,
           is_published: true,
           host_profile_id: selectedHostProfile,
+          show_ticket_count: showTicketCount,
         })
         .select()
         .single();
@@ -1301,6 +1304,25 @@ export default function CreatePartyScreen() {
                 />
               </View>
 
+              <View className="mb-8 p-4 bg-[#150d1e] rounded-3xl border border-white/5">
+                <View className="flex-row justify-between items-center">
+                  <View className="flex-1 mr-4">
+                    <Text className="text-white font-bold text-base mb-1">
+                      Show Ticket Quantities
+                    </Text>
+                    <Text className="text-gray-400 text-xs">
+                      When turned off, attendees only see "Sold Out" instead of how many tickets remain.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={showTicketCount}
+                    onValueChange={setShowTicketCount}
+                    trackColor={{ false: "#333", true: "#a855f7" }}
+                    thumbColor="#fff"
+                  />
+                </View>
+              </View>
+
               {ticketTiers.map((tier, index) => (
                 <View
                   key={tier.id}
@@ -1334,9 +1356,14 @@ export default function CreatePartyScreen() {
                       placeholder={`Price (${currency})`}
                       placeholderTextColor="#666"
                       value={tier.price}
-                      onChangeText={(val) =>
-                        updateTicketTier(tier.id, "price", val)
-                      }
+                      onChangeText={(val) => {
+                        const numericOnly = val.replace(/[^0-9]/g, "");
+                        if (!numericOnly) {
+                          updateTicketTier(tier.id, "price", "");
+                        } else {
+                          updateTicketTier(tier.id, "price", parseInt(numericOnly).toLocaleString("en-US"));
+                        }
+                      }}
                       keyboardType="numeric"
                     />
                     <TextInput

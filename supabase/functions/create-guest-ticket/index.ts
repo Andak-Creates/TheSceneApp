@@ -10,7 +10,8 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
 };
 
 Deno.serve(async (req) => {
@@ -36,17 +37,20 @@ Deno.serve(async (req) => {
     if (!partyId || !tierId || !guestEmail || !guestName || !reference) {
       return new Response(
         JSON.stringify({ error: "Missing required fields" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
       );
     }
 
     // Basic email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(guestEmail)) {
-      return new Response(
-        JSON.stringify({ error: "Invalid email address" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+      return new Response(JSON.stringify({ error: "Invalid email address" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // Prevent duplicate reference (idempotency)
@@ -58,7 +62,11 @@ Deno.serve(async (req) => {
 
     if (existing) {
       return new Response(
-        JSON.stringify({ success: true, ticketId: existing.id, duplicate: true }),
+        JSON.stringify({
+          success: true,
+          ticketId: existing.id,
+          duplicate: true,
+        }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -67,28 +75,61 @@ Deno.serve(async (req) => {
     if (totalPaid > 0) {
       const PAYSTACK_SECRET_KEY = Deno.env.get("PAYSTACK_SECRET_KEY");
       if (!PAYSTACK_SECRET_KEY) {
-        throw new Error("Server configuration error: Missing payment verification key.");
-      }
-
-      const verifyRes = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
-        headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` }
-      });
-      
-      const verifyData = await verifyRes.json();
-      
-      if (!verifyRes.ok || !verifyData.status || verifyData.data.status !== "success") {
-        return new Response(
-          JSON.stringify({ error: "Payment verification failed. The transaction was not successful." }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        throw new Error(
+          "Server configuration error: Missing payment verification key.",
         );
       }
-      
+
+      let verifyData: any = null;
+      let isSuccess = false;
+
+      // Retry loop to handle bank transfer eventual consistency lag
+      for (let attempt = 1; attempt <= 4; attempt++) {
+        const verifyRes = await fetch(
+          `https://api.paystack.co/transaction/verify/${reference}`,
+          {
+            headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` },
+          },
+        );
+
+        if (verifyRes.ok) {
+          verifyData = await verifyRes.json();
+          if (verifyData.status && verifyData.data?.status === "success") {
+            isSuccess = true;
+            break;
+          }
+        }
+
+        // Wait 2 seconds before retrying if not successful yet
+        if (attempt < 4) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+      }
+
+      if (!isSuccess) {
+        return new Response(
+          JSON.stringify({
+            error:
+              "Payment verification failed. The transaction was not successful.",
+          }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+
       // Paystack returns amount in kobo (or lowest denomination)
       const expectedAmountInKobo = Math.round(totalPaid * 100);
       if (verifyData.data.amount < expectedAmountInKobo) {
         return new Response(
-          JSON.stringify({ error: "Payment amount mismatch. Did not pay the full amount." }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          JSON.stringify({
+            error: "Payment amount mismatch. Did not pay the full amount.",
+          }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
         );
       }
     }
@@ -101,10 +142,10 @@ Deno.serve(async (req) => {
       .single();
 
     if (partyError || !party) {
-      return new Response(
-        JSON.stringify({ error: "Party not found" }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+      return new Response(JSON.stringify({ error: "Party not found" }), {
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const { data: tier } = await supabase
@@ -114,52 +155,72 @@ Deno.serve(async (req) => {
       .single();
 
     // BEFORE inserting the ticket, check capacity atomically
-    const { data: capacityResult, error: capacityError } = await supabase.rpc('purchase_tickets_atomic', {
-      p_tier_id: tierId,
-      p_quantity: quantity,
-    });
+    const { data: capacityResult, error: capacityError } = await supabase.rpc(
+      "purchase_tickets_atomic",
+      {
+        p_tier_id: tierId,
+        p_quantity: quantity,
+      },
+    );
 
     if (capacityError || !capacityResult?.success) {
-      const errReason = capacityResult?.error || capacityError?.message || "Unknown error";
+      const errReason =
+        capacityResult?.error || capacityError?.message || "Unknown error";
       let errMsg = "Failed to reserve tickets.";
-      
-      if (errReason === 'sold_out') {
+
+      if (errReason === "sold_out") {
         errMsg = "Sorry, these tickets are sold out.";
-      } else if (errReason === 'exceeds_limit') {
+      } else if (errReason === "exceeds_limit") {
         errMsg = `Max ${capacityResult.max} tickets per order for this tier.`;
       }
-      
-      return new Response(
-        JSON.stringify({ error: errMsg }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+
+      return new Response(JSON.stringify({ error: errMsg }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // Insert ticket (service role bypasses RLS)
+    const ticketPayload = {
+      party_id: partyId,
+      user_id: null, // guest
+      guest_email: guestEmail.toLowerCase().trim(),
+      guest_name: guestName.trim(),
+      ticket_tier_id: tierId,
+      purchase_price: purchasePrice,
+      service_fee: serviceFee,
+      total_paid: totalPaid,
+      payment_status: "completed",
+      reference,
+      quantity_purchased: quantity,
+      quantity_used: 0,
+    };
+    console.log("Inserting ticket payload:", JSON.stringify(ticketPayload));
+
     const { data: ticket, error: ticketError } = await supabase
       .from("tickets")
-      .insert({
-        party_id: partyId,
-        user_id: null, // guest
-        guest_email: guestEmail.toLowerCase().trim(),
-        guest_name: guestName.trim(),
-        ticket_tier_id: tierId,
-        purchase_price: purchasePrice,
-        service_fee: serviceFee,
-        total_paid: totalPaid,
-        payment_status: "completed",
-        reference,
-        quantity_purchased: quantity,
-        quantity_used: 0,
-      })
+      .insert(ticketPayload)
       .select()
       .single();
 
     if (ticketError) {
-      console.error("Ticket insert error:", ticketError);
+      // Compensate — release the capacity we reserved since the insert failed
+      await supabase.rpc('release_tickets_atomic', {
+        p_tier_id: tierId,
+        p_quantity: quantity,
+      });
+      console.error("Ticket insert error:", JSON.stringify(ticketError));
+      console.error("Ticket insert payload was:", JSON.stringify(ticketPayload));
       return new Response(
-        JSON.stringify({ error: "Failed to create ticket", details: ticketError }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        JSON.stringify({
+          error: "Failed to create ticket",
+          details: ticketError.message,
+          code: ticketError.code,
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
       );
     }
 
@@ -183,27 +244,30 @@ Deno.serve(async (req) => {
 
     // Send confirmation email to the guest (fire-and-forget — non-fatal)
     try {
-      const emailRes = await fetch(`${SUPABASE_URL}/functions/v1/send-ticket-email`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${SUPABASE_SERVICE_KEY}`,
+      const emailRes = await fetch(
+        `${SUPABASE_URL}/functions/v1/send-ticket-email`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+          },
+          body: JSON.stringify({
+            ticketId: ticket.id,
+            partyId: partyId,
+            guestEmail: guestEmail.toLowerCase().trim(),
+            guestName: guestName.trim(),
+            partyTitle: party.title,
+            partyDate: party.date ?? null,
+            partyLocation: party.location ?? null,
+            partyCity: party.city ?? null,
+            tierName: tier?.name ?? "General Admission",
+            quantity: quantity ?? 1,
+            totalPaid: totalPaid,
+            currency: currency || party.currency_code || "NGN",
+          }),
         },
-        body: JSON.stringify({
-          ticketId: ticket.id,
-          partyId: partyId,
-          guestEmail: guestEmail.toLowerCase().trim(),
-          guestName: guestName.trim(),
-          partyTitle: party.title,
-          partyDate: party.date ?? null,
-          partyLocation: party.location ?? null,
-          partyCity: party.city ?? null,
-          tierName: tier?.name ?? "General Admission",
-          quantity: quantity ?? 1,
-          totalPaid: totalPaid,
-          currency: currency || party.currency_code || "NGN",
-        }),
-      });
+      );
       if (!emailRes.ok) {
         const emailErr = await emailRes.text();
         console.error("send-ticket-email failed:", emailErr);
@@ -218,9 +282,9 @@ Deno.serve(async (req) => {
     );
   } catch (err) {
     console.error("create-guest-ticket error:", err);
-    return new Response(
-      JSON.stringify({ error: String(err) }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    return new Response(JSON.stringify({ error: String(err) }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 });

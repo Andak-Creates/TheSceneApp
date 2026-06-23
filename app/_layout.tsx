@@ -1,10 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import * as Linking from "expo-linking";
 import { ActivityIndicator, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { PaystackProvider } from "react-native-paystack-webview";
+
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import "../global.css";
 import { useAuthStore } from "../stores/authStore";
@@ -24,24 +25,13 @@ const queryClient = new QueryClient({
 
 Sentry.init({
   dsn: 'https://39e0484f1524507ed786ed803b34071c@o4511057460723712.ingest.de.sentry.io/4511057467342928',
-
-  // Adds more context data to events (IP address, cookies, user, etc.)
-  // For more information, visit: https://docs.sentry.io/platforms/react-native/data-management/data-collected/
   sendDefaultPii: true,
-
-  // Enable Logs
-  enableLogs: true,
-
-  // Configure Session Replay
-  replaysSessionSampleRate: 0.1,
-  replaysOnErrorSampleRate: 1,
-  integrations: [Sentry.mobileReplayIntegration(), Sentry.feedbackIntegration()],
-
-  // uncomment the line below to enable Spotlight (https://spotlightjs.com)
-  // spotlight: __DEV__,
+  // Mobile Replay disabled — known crash on New Architecture (newArchEnabled: true)
+  // replaysSessionSampleRate: 0.1,
+  // replaysOnErrorSampleRate: 1,
+  // integrations: [Sentry.mobileReplayIntegration(), Sentry.feedbackIntegration()],
 });
 
-const PAYSTACK_PUBLIC_KEY = process.env.EXPO_PUBLIC_PAYSTACK_PUBLIC_KEY!;
 
 export default Sentry.wrap(function RootLayout() {
   const { initialize, initialized, user } = useAuthStore();
@@ -49,9 +39,24 @@ export default Sentry.wrap(function RootLayout() {
   const { hasPreferences, checkPreferences, reset } = usePreferencesStore();
   const segments = useSegments();
   const router = useRouter();
+  const [isPasswordResetLink, setIsPasswordResetLink] = useState<boolean | null>(null);
 
   useEffect(() => {
     initialize();
+    // Check if the app was opened via a password reset deep link.
+    // We need to know this before the auth guard runs so we don't
+    // redirect the user away before they can exchange their token.
+    Linking.getInitialURL().then((url) => {
+      if (url) {
+        const parsed = Linking.parse(url);
+        const hasCode = !!parsed.queryParams?.code;
+        const hasTokenInHash = url.includes('access_token=');
+        const isResetPath = url.includes('reset-password');
+        setIsPasswordResetLink((hasCode || hasTokenInHash) && isResetPath);
+      } else {
+        setIsPasswordResetLink(false);
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -65,20 +70,28 @@ export default Sentry.wrap(function RootLayout() {
   }, [user]);
 
   useEffect(() => {
-    if (!initialized || hasPreferences === null) return;
+    // Wait until we know whether this is a password reset deep link
+    if (!initialized || hasPreferences === null || isPasswordResetLink === null) return;
 
     const first = String(segments[0] ?? "");
     const second = String(segments[1] ?? "");
     const inAuthGroup = first === "(auth)";
 
+    // Never redirect away from the reset-password screen — the token
+    // exchange happens there and needs time to complete.
+    if (second === "reset-password") return;
+
     if (!user && !inAuthGroup) {
-      router.replace("/(auth)/welcome");
-    } else if (user && !hasPreferences && second !== "onboarding" && second !== "reset-password") {
+      // Only redirect to welcome if this is NOT a password reset deep link
+      if (!isPasswordResetLink) {
+        router.replace("/(auth)/welcome");
+      }
+    } else if (user && !hasPreferences && second !== "onboarding") {
       router.replace("/(auth)/onboarding");
-    } else if (user && hasPreferences && inAuthGroup && second !== "onboarding" && second !== "reset-password") {
+    } else if (user && hasPreferences && inAuthGroup && second !== "onboarding") {
       router.replace("/(app)/feed");
     }
-  }, [user, initialized, segments, hasPreferences]);
+  }, [user, initialized, segments, hasPreferences, isPasswordResetLink]);
 
   const isLoading = !initialized || (user && hasPreferences === null);
 
@@ -86,7 +99,6 @@ export default Sentry.wrap(function RootLayout() {
     <QueryClientProvider client={queryClient}>
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <PaystackProvider publicKey={PAYSTACK_PUBLIC_KEY}>
           <StatusBar style="auto" />
 
           {/* Always mount navigation */}
@@ -112,7 +124,6 @@ export default Sentry.wrap(function RootLayout() {
               <ActivityIndicator size="large" />
             </View>
           )}
-        </PaystackProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
     </QueryClientProvider>

@@ -70,9 +70,6 @@ export default function PartyCard({ party, onReviewPress }: PartyCardProps) {
         <Text className="text-white text-[10px] font-semibold" numberOfLines={1}>
           {party.host_profile.name}
         </Text>
-        {party.host_profile.is_verified && (
-          <Ionicons name="checkmark-circle" size={10} color="#a855f7" style={{ marginLeft: 5 }} />
-        )}
       </View>
     );
   };
