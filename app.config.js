@@ -4,7 +4,7 @@ export default {
   expo: {
     name: IS_DEV ? "TheScene (Dev)" : "TheScene",
     slug: "TheScene",
-    version: "1.0.9",
+    version: "1.0.10",
     orientation: "portrait",
     icon: "./assets/images/thescene-logo.png",
     scheme: "thescene",
@@ -39,14 +39,7 @@ export default {
       output: "static",
     },
     plugins: [
-      [
-        "@sentry/react-native/expo",
-        {
-          url: "https://sentry.io/",
-          project: "react-native",
-          organization: "thescene-f3",
-        },
-      ],
+
       [
         "expo-notifications",
         {

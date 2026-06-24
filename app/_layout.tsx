@@ -11,7 +11,6 @@ import "../global.css";
 import { useAuthStore } from "../stores/authStore";
 import { usePreferencesStore } from "../stores/preferencesStore";
 import { useUserStore } from "../stores/userStore";
-import * as Sentry from '@sentry/react-native';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -23,17 +22,8 @@ const queryClient = new QueryClient({
   },
 });
 
-Sentry.init({
-  dsn: 'https://39e0484f1524507ed786ed803b34071c@o4511057460723712.ingest.de.sentry.io/4511057467342928',
-  sendDefaultPii: true,
-  // Mobile Replay disabled — known crash on New Architecture (newArchEnabled: true)
-  // replaysSessionSampleRate: 0.1,
-  // replaysOnErrorSampleRate: 1,
-  // integrations: [Sentry.mobileReplayIntegration(), Sentry.feedbackIntegration()],
-});
 
-
-export default Sentry.wrap(function RootLayout() {
+export default function RootLayout() {
   const { initialize, initialized, user } = useAuthStore();
   const { fetchProfile, clearProfile } = useUserStore();
   const { hasPreferences, checkPreferences, reset } = usePreferencesStore();
