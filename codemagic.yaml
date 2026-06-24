@@ -6,6 +6,8 @@ workflows:
     integrations:
       app_store_connect: codemagic
     environment:
+      groups:
+        - expo_credentials
       node: latest
       xcode: latest
       cocoapods: default
