@@ -31,10 +31,23 @@ workflows:
           xcode-project use-profiles --project ios/TheScene.xcodeproj --profile ci_certs/profile.mobileprovision
       - name: Build iOS
         script: |
-          xcode-project build-ipa \
-            --workspace "ios/TheScene.xcworkspace" \
-            --scheme "TheScene" \
-            --config "Release"
+          mkdir -p /tmp/xcodebuild_logs
+          set -o pipefail
+          xcodebuild \
+            -workspace "ios/TheScene.xcworkspace" \
+            -scheme "TheScene" \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "$CM_BUILD_DIR/TheScene.xcarchive" \
+            archive 2>&1 | tee /tmp/xcodebuild_logs/archive.log
+      - name: Export IPA
+        script: |
+          mkdir -p build/ios/ipa
+          xcodebuild \
+            -exportArchive \
+            -archivePath "$CM_BUILD_DIR/TheScene.xcarchive" \
+            -exportPath "build/ios/ipa" \
+            -exportOptionsPlist "ios/ExportOptions.plist" 2>&1 | tee /tmp/xcodebuild_logs/export.log
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
