@@ -9,7 +9,7 @@ workflows:
       groups:
         - expo_credentials
       node: latest
-      xcode: latest
+      xcode: 16.2
       cocoapods: default
       vars:
         EXPO_TOKEN: $EXPO_TOKEN
@@ -33,7 +33,8 @@ workflows:
         script: |
           xcode-project build-ipa \
             --workspace "ios/TheScene.xcworkspace" \
-            --scheme "TheScene"
+            --scheme "TheScene" \
+            --config "Release"
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
