@@ -12,6 +12,7 @@ import { useAuthStore } from "../stores/authStore";
 import { usePreferencesStore } from "../stores/preferencesStore";
 import { useUserStore } from "../stores/userStore";
 
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

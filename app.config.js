@@ -9,7 +9,6 @@ export default {
     icon: "./assets/images/thescene-logo.png",
     scheme: "thescene",
     userInterfaceStyle: "automatic",
-    newArchEnabled: false,
     ios: {
       supportsTablet: true,
       bundleIdentifier: IS_DEV
@@ -81,7 +80,7 @@ export default {
       url: "https://u.expo.dev/1a11e3b7-a90c-4fe3-9a4a-9c73ae26aa22",
     },
     runtimeVersion: {
-      policy: "appVersion",
+      policy: "fingerprint",
     },
   },
 };
