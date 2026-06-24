@@ -4,12 +4,12 @@ export default {
   expo: {
     name: IS_DEV ? "TheScene (Dev)" : "TheScene",
     slug: "TheScene",
-    version: "1.0.10",
+    version: "1.0.11",
     orientation: "portrait",
     icon: "./assets/images/thescene-logo.png",
     scheme: "thescene",
     userInterfaceStyle: "automatic",
-    newArchEnabled: true,
+    newArchEnabled: false,
     ios: {
       supportsTablet: true,
       bundleIdentifier: IS_DEV
