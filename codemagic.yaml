@@ -26,11 +26,9 @@ workflows:
           cd ios && pod install
       - name: Set up code signing
         script: |
-          echo $CM_CERTIFICATE | base64 --decode > /tmp/cert.p12
-          echo $CM_PROVISIONING_PROFILE | base64 --decode > /tmp/profile.mobileprovision
           keychain initialize
-          keychain add-certificates --certificate /tmp/cert.p12 --certificate-password $CM_CERT_PASSWORD
-          xcode-project use-profiles --profile /tmp/profile.mobileprovision
+          keychain add-certificates --certificate ci_certs/dist-cert.p12 --certificate-password "XPc9rEcZ4FEVuThu0TdVxQ=="
+          xcode-project use-profiles --profile ci_certs/profile.mobileprovision
       - name: Build iOS
         script: |
           xcode-project build-ipa \
