@@ -25,6 +25,9 @@ workflows:
       - name: Install CocoaPods
         script: |
           cd ios && pod install
+      - name: Set up code signing
+        script: |
+          xcode-project use-profiles
       - name: Build iOS
         script: |
           xcode-project build-ipa \
