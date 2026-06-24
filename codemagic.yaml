@@ -31,14 +31,7 @@ workflows:
               <key>teamID</key>
               <string>22WCSLKPL6</string>
               <key>signingStyle</key>
-              <string>manual</string>
-              <key>signingCertificate</key>
-              <string>iPhone Distribution</string>
-              <key>provisioningProfiles</key>
-              <dict>
-                  <key>com.vindi.thescene</key>
-                  <string>6141b0b2-c852-4ae2-951c-4121106d6a93</string>
-              </dict>
+              <string>automatic</string>
               <key>uploadBitcode</key>
               <false/>
               <key>uploadSymbols</key>
@@ -55,7 +48,8 @@ workflows:
         script: |
           keychain initialize
           keychain add-certificates --certificate ci_certs/dist-cert.p12 --certificate-password "XPc9rEcZ4FEVuThu0TdVxQ=="
-          xcode-project use-profiles --project ios/TheScene.xcodeproj --profile ci_certs/profile.mobileprovision
+          app-store-connect fetch-signing-files com.vindi.thescene --type IOS_APP_STORE --create
+          xcode-project use-profiles
       - name: Build iOS
         script: |
           mkdir -p /tmp/xcodebuild_logs
