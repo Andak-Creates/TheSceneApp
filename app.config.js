@@ -4,7 +4,7 @@ export default {
   expo: {
     name: IS_DEV ? "TheScene (Dev)" : "TheScene",
     slug: "TheScene",
-    version: "1.0.11",
+    version: "1.0.12",
     orientation: "portrait",
     icon: "./assets/images/thescene-logo.png",
     scheme: "thescene",
