@@ -28,7 +28,7 @@ workflows:
         script: |
           keychain initialize
           keychain add-certificates --certificate ci_certs/dist-cert.p12 --certificate-password "XPc9rEcZ4FEVuThu0TdVxQ=="
-          xcode-project use-profiles --profile ci_certs/profile.mobileprovision
+          xcode-project use-profiles --project ios/TheScene.xcodeproj --profile ci_certs/profile.mobileprovision
       - name: Build iOS
         script: |
           xcode-project build-ipa \

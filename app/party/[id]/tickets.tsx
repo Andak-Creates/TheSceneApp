@@ -652,7 +652,7 @@ function InnerTicketPurchaseScreen() {
                   className="w-10 h-10 rounded-full bg-white/10 items-center justify-center"
                   disabled={
                     quantity >= selectedTierData.available ||
-                    (selectedTierData.max_per_order &&
+                    !!(selectedTierData.max_per_order &&
                       quantity >= selectedTierData.max_per_order)
                   }
                 >
