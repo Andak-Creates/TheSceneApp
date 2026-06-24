@@ -59,6 +59,7 @@ workflows:
             -configuration Release \
             -destination "generic/platform=iOS" \
             -archivePath "$CM_BUILD_DIR/TheScene.xcarchive" \
+            DEVELOPMENT_TEAM="22WCSLKPL6" \
             archive 2>&1 | tee /tmp/xcodebuild_logs/archive.log
       - name: Export IPA
         script: |
