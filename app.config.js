@@ -9,7 +9,7 @@ export default {
     icon: "./assets/images/thescene-logo.png",
     scheme: "thescene",
     userInterfaceStyle: "automatic",
-    newArchEnabled: false,
+    newArchEnabled: true,
     ios: {
       supportsTablet: true,
       bundleIdentifier: IS_DEV
