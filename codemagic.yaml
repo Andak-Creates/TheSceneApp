@@ -105,7 +105,13 @@ workflows:
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="iPhone Distribution" \
             PROVISIONING_PROFILE="$PROFILE_UUID" \
-            COMPILER_INDEX_STORE_ENABLE=NO
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            > xcodebuild.log 2>&1 || {
+              echo "=== BUILD FAILED ==="
+              echo "=== Printing last 200 lines of build log ==="
+              tail -n 200 xcodebuild.log
+              exit 1
+            }
 
           echo "=== Generating ExportOptions.plist ==="
           cat > ExportOptions.plist << EOF
@@ -135,11 +141,17 @@ workflows:
             -exportArchive \
             -archivePath "$ARCHIVE_PATH" \
             -exportOptionsPlist ExportOptions.plist \
-            -exportPath "build/ios/ipa/"
+            -exportPath "build/ios/ipa/" \
+            > xcodebuild_export.log 2>&1 || {
+              echo "=== EXPORT FAILED ==="
+              echo "=== Printing last 200 lines of export log ==="
+              tail -n 200 xcodebuild_export.log
+              exit 1
+            }
 
     artifacts:
       - build/ios/ipa/*.ipa
-      - /tmp/xcodebuild_logs/*.log
+      - xcodebuild*.log
       - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
     publishing:
       app_store_connect:
