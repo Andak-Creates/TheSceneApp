@@ -10,7 +10,6 @@ import "../global.css";
 import { useAuthStore } from "../stores/authStore";
 import { usePreferencesStore } from "../stores/preferencesStore";
 import { useUserStore } from "../stores/userStore";
-import * as Sentry from '@sentry/react-native';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -22,28 +21,9 @@ const queryClient = new QueryClient({
   },
 });
 
-Sentry.init({
-  dsn: 'https://39e0484f1524507ed786ed803b34071c@o4511057460723712.ingest.de.sentry.io/4511057467342928',
-
-  // Adds more context data to events (IP address, cookies, user, etc.)
-  // For more information, visit: https://docs.sentry.io/platforms/react-native/data-management/data-collected/
-  sendDefaultPii: true,
-
-  // Enable Logs
-  enableLogs: true,
-
-  // Configure Session Replay
-  replaysSessionSampleRate: 0.1,
-  replaysOnErrorSampleRate: 1,
-  integrations: [Sentry.mobileReplayIntegration(), Sentry.feedbackIntegration()],
-
-  // uncomment the line below to enable Spotlight (https://spotlightjs.com)
-  // spotlight: __DEV__,
-});
-
 const PAYSTACK_PUBLIC_KEY = process.env.EXPO_PUBLIC_PAYSTACK_PUBLIC_KEY!;
 
-export default Sentry.wrap(function RootLayout() {
+export default function RootLayout() {
   const { initialize, initialized, user } = useAuthStore();
   const { fetchProfile, clearProfile } = useUserStore();
   const { hasPreferences, checkPreferences, reset } = usePreferencesStore();
@@ -117,4 +97,4 @@ export default Sentry.wrap(function RootLayout() {
     </GestureHandlerRootView>
     </QueryClientProvider>
   );
-});
+}
