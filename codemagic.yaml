@@ -75,7 +75,9 @@ workflows:
           security find-identity -v -p codesigning
 
           echo "=== Installing provisioning profile with correct UUID filename ==="
-          PROFILE_UUID=$(security cms -D -i ci_certs/profile.mobileprovision | /usr/libexec/PlistBuddy -c "Print :UUID" /dev/stdin)
+          security cms -D -i ci_certs/profile.mobileprovision > /tmp/profile.plist
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print :UUID" /tmp/profile.plist)
+          rm /tmp/profile.plist
           echo "Profile UUID: $PROFILE_UUID"
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles/
           cp ci_certs/profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/$PROFILE_UUID.mobileprovision
