@@ -40,21 +40,20 @@ workflows:
 
           content = content.replace("ProvisioningStyle = Automatic;", "ProvisioningStyle = Manual;")
 
-          pattern = re.compile(r"(buildSettings = \{)(.*?)(\};)", re.DOTALL)
+          pattern = re.compile(r"(buildSettings = \{)(.*?)(\t*?\};)", re.DOTALL)
           def replace(m):
               prefix, body, suffix = m.group(1), m.group(2), m.group(3)
-              settings = {}
-              for line in body.splitlines():
-                  ls = line.strip()
-                  if ls and "=" in ls:
-                      parts = ls.split("=", 1)
-                      settings[parts[0].strip()] = parts[1].strip()
-              settings["CODE_SIGN_STYLE"] = "Manual;"
-              settings["DEVELOPMENT_TEAM"] = "22WCSLKPL6;"
-              settings["PROVISIONING_PROFILE"] = "\"6141b0b2-c852-4ae2-951c-4121106d6a93\";"
-              settings["PROVISIONING_PROFILE_SPECIFIER"] = "\"*[expo] com.vindi.thescene AppStore 2026-03-11T23:32:22.216Z\";"
-              settings["CODE_SIGN_IDENTITY"] = "\"iPhone Distribution\";"
-              return prefix + "\n" + "\n".join(f"\t\t\t\t{k} = {v}" for k, v in settings.items()) + "\n\t\t\t" + suffix
+              for key in ["CODE_SIGN_STYLE", "DEVELOPMENT_TEAM", "PROVISIONING_PROFILE", "PROVISIONING_PROFILE_SPECIFIER", "CODE_SIGN_IDENTITY"]:
+                  body = re.sub(r"^\t*" + key + r"\s*=.*?\n", "", body, flags=re.MULTILINE)
+              body = body.rstrip()
+              new_settings = (
+                  "\n\t\t\t\tCODE_SIGN_STYLE = Manual;\n"
+                  "\t\t\t\tDEVELOPMENT_TEAM = 22WCSLKPL6;\n"
+                  "\t\t\t\tPROVISIONING_PROFILE = \"6141b0b2-c852-4ae2-951c-4121106d6a93\";\n"
+                  "\t\t\t\tPROVISIONING_PROFILE_SPECIFIER = \"*[expo] com.vindi.thescene AppStore 2026-03-11T23:32:22.216Z\";\n"
+                  "\t\t\t\tCODE_SIGN_IDENTITY = \"iPhone Distribution\";\n"
+              )
+              return prefix + body + new_settings + suffix
           
           content = pattern.sub(replace, content)
           with open(path, "w") as f:
