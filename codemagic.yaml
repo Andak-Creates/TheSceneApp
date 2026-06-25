@@ -83,6 +83,13 @@ workflows:
           cp ci_certs/profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/$PROFILE_UUID.mobileprovision
           ls -la ~/Library/MobileDevice/Provisioning\ Profiles/
 
+          echo "=== Installed provisioning profiles and their entitlements ==="
+          for f in ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision; do
+            [ -e "$f" ] || continue
+            echo "--- Profile: $f ---"
+            security cms -D -i "$f" | plutil -extract Entitlements xml1 -o - -
+          done
+
           echo "=== Profile entitlements ==="
           security cms -D -i ci_certs/profile.mobileprovision | plutil -extract Entitlements xml1 -o - -
 
@@ -108,8 +115,8 @@ workflows:
             COMPILER_INDEX_STORE_ENABLE=NO \
             > xcodebuild.log 2>&1 || {
               echo "=== BUILD FAILED ==="
-              echo "=== Printing last 200 lines of build log ==="
-              tail -n 200 xcodebuild.log
+              echo "=== Printing error / failure context ==="
+              grep -in -C 5 "error:" xcodebuild.log || grep -in -C 5 "fail" xcodebuild.log || grep -in -C 5 "❌" xcodebuild.log || tail -n 200 xcodebuild.log
               exit 1
             }
 
