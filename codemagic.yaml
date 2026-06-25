@@ -44,35 +44,67 @@ workflows:
           echo "=== Listing keychain certificates after import ==="
           security find-identity -v -p codesigning
 
-          echo "=== Installing provisioning profile from repo (includes Push Notifications) ==="
+          echo "=== Installing provisioning profile with correct UUID filename ==="
+          PROFILE_UUID=$(security cms -D -i ci_certs/profile.mobileprovision | /usr/libexec/PlistBuddy -c "Print :UUID" /dev/stdin)
+          echo "Profile UUID: $PROFILE_UUID"
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles/
-          cp ci_certs/profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
+          cp ci_certs/profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/$PROFILE_UUID.mobileprovision
+          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/
 
-          echo "=== Listing provisioning profiles directory BEFORE use-profiles ==="
-          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/ || echo "Directory does not exist or is empty"
-
-          echo "=== Checking profile entitlements ==="
+          echo "=== Profile entitlements ==="
           security cms -D -i ci_certs/profile.mobileprovision | plutil -extract Entitlements xml1 -o - -
 
-          echo "=== Running xcode-project use-profiles ==="
-          xcode-project use-profiles --project ios/TheScene.xcodeproj --verbose
-      - name: Debug provisioning profile
-        script: |
-          echo "=== Listing provisioning profiles directory AFTER use-profiles ==="
-          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/ || echo "Directory does not exist or is empty"
+          # Export UUID for use in build step
+          echo "PROFILE_UUID=$PROFILE_UUID" >> $CM_ENV
 
-          echo "=== Installed provisioning profiles and their entitlements ==="
-          for f in ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision; do
-            [ -e "$f" ] || continue
-            echo "--- Profile: $f ---"
-            security cms -D -i "$f" | plutil -extract Entitlements xml1 -o - -
-          done
       - name: Build iOS
         script: |
-          xcode-project build-ipa \
-            --workspace "ios/TheScene.xcworkspace" \
-            --scheme "TheScene" \
-            --config "Release"
+          echo "=== Using Profile UUID: $PROFILE_UUID ==="
+          ARCHIVE_PATH="build/ios/xcarchive/TheScene.xcarchive"
+          mkdir -p build/ios/ipa/
+
+          echo "=== Archiving ==="
+          xcodebuild \
+            -workspace "ios/TheScene.xcworkspace" \
+            -scheme "TheScene" \
+            -config "Release" \
+            -archivePath "$ARCHIVE_PATH" \
+            archive \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="iPhone Distribution" \
+            PROVISIONING_PROFILE="$PROFILE_UUID" \
+            COMPILER_INDEX_STORE_ENABLE=NO
+
+          echo "=== Generating ExportOptions.plist ==="
+          cat > ExportOptions.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.vindi.thescene</key>
+              <string>$PROFILE_UUID</string>
+            </dict>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>stripSwiftSymbols</key>
+            <true/>
+            <key>uploadBitcode</key>
+            <false/>
+          </dict>
+          </plist>
+          EOF
+
+          echo "=== Exporting IPA ==="
+          xcodebuild \
+            -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath "build/ios/ipa/"
+
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
