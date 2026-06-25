@@ -1,0 +1,80 @@
+workflows:
+  ios-release:
+    name: iOS Release Build
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: codemagic
+    environment:
+      groups:
+        - expo_credentials
+      node: latest
+      xcode: 16.2
+      cocoapods: default
+      vars:
+        EXPO_TOKEN: $EXPO_TOKEN
+        CURRENT_PROJECT_VERSION: "59"
+    scripts:
+      - name: Install dependencies
+        script: |
+          npm install
+      - name: Run Expo prebuild
+        script: |
+          npx expo prebuild --clean --platform ios
+
+          # Fix Push Notifications entitlement mismatch for Release build
+          ENTITLEMENTS_FILE="ios/TheScene/TheScene.entitlements"
+          if [ -f "$ENTITLEMENTS_FILE" ]; then
+            /usr/libexec/PlistBuddy -c "Set :aps-environment production" "$ENTITLEMENTS_FILE" || true
+          fi
+
+          echo "=== Entitlements file content after prebuild ==="
+          cat "$ENTITLEMENTS_FILE" || echo "Entitlements file not found at $ENTITLEMENTS_FILE"
+      - name: Install CocoaPods
+        script: |
+          cd ios && pod install
+      - name: Set up code signing
+        script: |
+          set -x
+          keychain initialize
+
+          echo "=== Adding distribution certificate to keychain ==="
+          keychain add-certificates --certificate ci_certs/dist-cert.p12 --certificate-password "XPc9rEcZ4FEVuThu0TdVxQ=="
+
+          echo "=== Listing keychain certificates after import ==="
+          security find-identity -v -p codesigning
+
+          echo "=== Fetching signing files ==="
+          app-store-connect fetch-signing-files com.vindi.thescene --type IOS_APP_STORE --create --verbose
+
+          echo "=== Listing provisioning profiles directory BEFORE use-profiles ==="
+          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/ || echo "Directory does not exist or is empty"
+
+          echo "=== Running xcode-project use-profiles ==="
+          xcode-project use-profiles --project ios/TheScene.xcodeproj --verbose
+      - name: Debug provisioning profile
+        script: |
+          echo "=== Listing provisioning profiles directory AFTER use-profiles ==="
+          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/ || echo "Directory does not exist or is empty"
+
+          echo "=== Installed provisioning profiles and their entitlements ==="
+          for f in ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision; do
+            [ -e "$f" ] || continue
+            echo "--- Profile: $f ---"
+            security cms -D -i "$f" | plutil -extract Entitlements xml1 -o - -
+          done
+      - name: Build iOS
+        script: |
+          xcode-project build-ipa \
+            --workspace "ios/TheScene.xcworkspace" \
+            --scheme "TheScene" \
+            --config "Release"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        submit_to_app_store: true
