@@ -44,11 +44,15 @@ workflows:
           echo "=== Listing keychain certificates after import ==="
           security find-identity -v -p codesigning
 
-          echo "=== Fetching signing files ==="
-          app-store-connect fetch-signing-files com.vindi.thescene --type IOS_APP_STORE --create --verbose
+          echo "=== Installing provisioning profile from repo (includes Push Notifications) ==="
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles/
+          cp ci_certs/profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
 
           echo "=== Listing provisioning profiles directory BEFORE use-profiles ==="
           ls -la ~/Library/MobileDevice/Provisioning\ Profiles/ || echo "Directory does not exist or is empty"
+
+          echo "=== Checking profile entitlements ==="
+          security cms -D -i ci_certs/profile.mobileprovision | plutil -extract Entitlements xml1 -o - -
 
           echo "=== Running xcode-project use-profiles ==="
           xcode-project use-profiles --project ios/TheScene.xcodeproj --verbose
