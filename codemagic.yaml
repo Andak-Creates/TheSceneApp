@@ -6,9 +6,6 @@ workflows:
     integrations:
       app_store_connect: codemagic
     environment:
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.vindi.thescene
       groups:
         - expo_credentials
       node: latest
@@ -33,6 +30,11 @@ workflows:
       - name: Install CocoaPods
         script: |
           cd ios && pod install
+      - name: Set up code signing
+        script: |
+          keychain initialize
+          app-store-connect fetch-signing-files com.vindi.thescene --type IOS_APP_STORE --create
+          xcode-project use-profiles --project ios/TheScene.xcodeproj
       - name: Build iOS
         script: |
           xcode-project build-ipa \
