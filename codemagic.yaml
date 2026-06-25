@@ -6,6 +6,9 @@ workflows:
     integrations:
       app_store_connect: codemagic
     environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.vindi.thescene
       groups:
         - expo_credentials
       node: latest
@@ -22,20 +25,14 @@ workflows:
         script: |
           npx expo prebuild --clean --platform ios
           
-          # Bypass Push Notifications requirement to fix profile mismatch
+          # Fix Push Notifications entitlement mismatch for Release build
           ENTITLEMENTS_FILE="ios/TheScene/TheScene.entitlements"
           if [ -f "$ENTITLEMENTS_FILE" ]; then
-            /usr/libexec/PlistBuddy -c "Delete :aps-environment" "$ENTITLEMENTS_FILE" || true
+            /usr/libexec/PlistBuddy -c "Set :aps-environment production" "$ENTITLEMENTS_FILE" || true
           fi
-          sed -i '' '/com.apple.Push = {/,/};/d' "ios/TheScene.xcodeproj/project.pbxproj" || true
       - name: Install CocoaPods
         script: |
           cd ios && pod install
-      - name: Set up code signing
-        script: |
-          keychain initialize
-          app-store-connect fetch-signing-files com.vindi.thescene --type IOS_APP_STORE --create
-          xcode-project use-profiles --project ios/TheScene.xcodeproj
       - name: Build iOS
         script: |
           xcode-project build-ipa \
