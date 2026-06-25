@@ -21,12 +21,15 @@ workflows:
       - name: Run Expo prebuild
         script: |
           npx expo prebuild --clean --platform ios
-          
+
           # Fix Push Notifications entitlement mismatch for Release build
           ENTITLEMENTS_FILE="ios/TheScene/TheScene.entitlements"
           if [ -f "$ENTITLEMENTS_FILE" ]; then
             /usr/libexec/PlistBuddy -c "Set :aps-environment production" "$ENTITLEMENTS_FILE" || true
           fi
+
+          echo "=== Entitlements file content after prebuild ==="
+          cat "$ENTITLEMENTS_FILE" || echo "Entitlements file not found at $ENTITLEMENTS_FILE"
       - name: Install CocoaPods
         script: |
           cd ios && pod install
@@ -35,6 +38,13 @@ workflows:
           keychain initialize
           app-store-connect fetch-signing-files com.vindi.thescene --type IOS_APP_STORE --create
           xcode-project use-profiles --project ios/TheScene.xcodeproj
+      - name: Debug provisioning profile
+        script: |
+          echo "=== Installed provisioning profiles and their entitlements ==="
+          find ~/Library/MobileDevice/Provisioning\ Profiles -name "*.mobileprovision" -exec sh -c '
+            echo "--- Profile: {} ---"
+            security cms -D -i "{}" | plutil -extract Entitlements xml1 -o - -
+          ' \;
       - name: Build iOS
         script: |
           xcode-project build-ipa \
