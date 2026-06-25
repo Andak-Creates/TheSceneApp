@@ -21,26 +21,6 @@ workflows:
       - name: Run Expo prebuild
         script: |
           npx expo prebuild --clean --platform ios
-          cat > ios/ExportOptions.plist << 'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>app-store</string>
-              <key>teamID</key>
-              <string>22WCSLKPL6</string>
-              <key>signingStyle</key>
-              <string>automatic</string>
-              <key>uploadBitcode</key>
-              <false/>
-              <key>uploadSymbols</key>
-              <true/>
-              <key>compileBitcode</key>
-              <false/>
-          </dict>
-          </plist>
-          EOF
       - name: Install CocoaPods
         script: |
           cd ios && pod install
@@ -51,24 +31,10 @@ workflows:
           xcode-project use-profiles --project ios/TheScene.xcodeproj
       - name: Build iOS
         script: |
-          mkdir -p /tmp/xcodebuild_logs
-          set -o pipefail
-          xcodebuild \
-            -workspace "ios/TheScene.xcworkspace" \
-            -scheme "TheScene" \
-            -configuration Release \
-            -destination "generic/platform=iOS" \
-            -archivePath "$CM_BUILD_DIR/TheScene.xcarchive" \
-            DEVELOPMENT_TEAM="22WCSLKPL6" \
-            archive 2>&1 | tee /tmp/xcodebuild_logs/archive.log
-      - name: Export IPA
-        script: |
-          mkdir -p build/ios/ipa
-          xcodebuild \
-            -exportArchive \
-            -archivePath "$CM_BUILD_DIR/TheScene.xcarchive" \
-            -exportPath "build/ios/ipa" \
-            -exportOptionsPlist "ios/ExportOptions.plist" 2>&1 | tee /tmp/xcodebuild_logs/export.log
+          xcode-project build-ipa \
+            --workspace "ios/TheScene.xcworkspace" \
+            --scheme "TheScene" \
+            --config "Release"
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
