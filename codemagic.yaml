@@ -35,16 +35,30 @@ workflows:
           cd ios && pod install
       - name: Set up code signing
         script: |
+          set -x
           keychain initialize
-          app-store-connect fetch-signing-files com.vindi.thescene --type IOS_APP_STORE --create
-          xcode-project use-profiles --project ios/TheScene.xcodeproj
+
+          echo "=== Fetching signing files ==="
+          app-store-connect fetch-signing-files com.vindi.thescene --type IOS_APP_STORE --create --verbose
+
+          echo "=== Listing keychain certificates ==="
+          security find-identity -v -p codesigning
+
+          echo "=== Listing provisioning profiles directory BEFORE use-profiles ==="
+          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/ || echo "Directory does not exist or is empty"
+
+          echo "=== Running xcode-project use-profiles ==="
+          xcode-project use-profiles --project ios/TheScene.xcodeproj --verbose
       - name: Debug provisioning profile
         script: |
+          echo "=== Listing provisioning profiles directory AFTER use-profiles ==="
+          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/ || echo "Directory does not exist or is empty"
+
           echo "=== Installed provisioning profiles and their entitlements ==="
-          find ~/Library/MobileDevice/Provisioning\ Profiles -name "*.mobileprovision" -exec sh -c '
-            echo "--- Profile: {} ---"
-            security cms -D -i "{}" | plutil -extract Entitlements xml1 -o - -
-          ' \;
+          for f in ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision; do
+            echo "--- Profile: $f ---"
+            security cms -D -i "$f" | plutil -extract Entitlements xml1 -o - -
+          done
       - name: Build iOS
         script: |
           xcode-project build-ipa \
