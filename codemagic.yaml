@@ -22,11 +22,14 @@ workflows:
         script: |
           npx expo prebuild --clean --platform ios
           
-          # Fix Push Notifications entitlement mismatch for Release build
+          # Safely bypass Push Notifications requirement without corrupting the project file
           ENTITLEMENTS_FILE="ios/TheScene/TheScene.entitlements"
           if [ -f "$ENTITLEMENTS_FILE" ]; then
-            /usr/libexec/PlistBuddy -c "Set :aps-environment production" "$ENTITLEMENTS_FILE" || true
+            /usr/libexec/PlistBuddy -c "Delete :aps-environment" "$ENTITLEMENTS_FILE" || true
           fi
+          
+          # Use perl to safely delete the multi-line capability block while keeping braces perfectly balanced
+          perl -0777 -pi -e 's/com\.apple\.Push = \{\s*enabled = 1;\s*\};//g' "ios/TheScene.xcodeproj/project.pbxproj"
       - name: Install CocoaPods
         script: |
           cd ios && pod install
