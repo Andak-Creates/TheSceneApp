@@ -21,6 +21,12 @@ workflows:
       - name: Run Expo prebuild
         script: |
           npx expo prebuild --clean --platform ios
+          
+          # Fix Push Notifications entitlement mismatch for Release build
+          ENTITLEMENTS_FILE="ios/TheScene/TheScene.entitlements"
+          if [ -f "$ENTITLEMENTS_FILE" ]; then
+            /usr/libexec/PlistBuddy -c "Set :aps-environment production" "$ENTITLEMENTS_FILE" || true
+          fi
       - name: Install CocoaPods
         script: |
           cd ios && pod install
