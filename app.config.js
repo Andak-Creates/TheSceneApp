@@ -1,8 +1,9 @@
 const IS_DEV = process.env.APP_VARIANT === "development";
 
 // Custom config plugin that fixes 'folly/coro/Coroutine.h' file not found
-// on iOS builds by injecting FOLLY_CFG_NO_COROUTINES=1 into the Podfile.
-// expo-build-properties does not support this flag directly, so we use withDangerousMod.
+// on Xcode 26 builds. We inject FOLLY_CFG_NO_COROUTINES=1 into the existing
+// post_install block (before the final 'end') so CocoaPods doesn't complain
+// about multiple post_install hooks.
 const { withDangerousMod } = require("@expo/config-plugins");
 const fs = require("fs");
 const path = require("path");
@@ -19,23 +20,39 @@ const withFollyCoroutinesFix = (config) => {
 
       let podfile = fs.readFileSync(podfilePath, "utf8");
       console.log(`[withFollyCoroutinesFix] Read Podfile (length: ${podfile.length})`);
-      console.log(`[withFollyCoroutinesFix] Contains FOLLY_CFG_NO_COROUTINES: ${podfile.includes("FOLLY_CFG_NO_COROUTINES")}`);
-      console.log(`[withFollyCoroutinesFix] Contains 'post_install do |installer|': ${podfile.includes("post_install do |installer|")}`);
-      console.log(`[withFollyCoroutinesFix] Contains 'react_native_post_install': ${podfile.includes("react_native_post_install")}`);
-      
-      if (!podfile.includes("FOLLY_CFG_NO_COROUTINES")) {
-        const follyFix = `\n  # Fix: 'folly/coro/Coroutine.h' file not found\n  installer.pods_project.targets.each do |target|\n    target.build_configurations.each do |config|\n      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= ['$(inherited)']\n      unless config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'].include?('FOLLY_CFG_NO_COROUTINES=1')\n        config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'FOLLY_CFG_NO_COROUTINES=1'\n      end\n    end\n  end\n`;
-        const updated = podfile.replace(
-          /(react_native_post_install\s*\([\s\S]*?\))/,
-          `$1${follyFix}`
-        );
-        if (updated === podfile) {
-          console.log("[withFollyCoroutinesFix] WARNING: Replace pattern did NOT match!");
-        } else {
-          console.log("[withFollyCoroutinesFix] SUCCESS: Replaced post_install block.");
-        }
-        fs.writeFileSync(podfilePath, updated);
+
+      if (podfile.includes("FOLLY_CFG_NO_COROUTINES")) {
+        console.log("[withFollyCoroutinesFix] SKIP: FOLLY_CFG_NO_COROUTINES already present.");
+        return modConfig;
       }
+
+      // CocoaPods only allows ONE post_install block.
+      // We inject our fix right before the final 'end' that closes the
+      // existing post_install block. This is the last 'end' on its own line.
+      const follySnippet = [
+        "",
+        "  # Fix: 'folly/coro/Coroutine.h' file not found on Xcode 26",
+        "  installer.pods_project.targets.each do |target|",
+        "    target.build_configurations.each do |config|",
+        "      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= ['$(inherited)']",
+        "      unless config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'].include?('FOLLY_CFG_NO_COROUTINES=1')",
+        "        config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'FOLLY_CFG_NO_COROUTINES=1'",
+        "      end",
+        "    end",
+        "  end",
+      ].join("\n");
+
+      // Find the last 'end' on its own line (closing post_install block)
+      const lastEndIndex = podfile.lastIndexOf("\nend");
+      if (lastEndIndex === -1) {
+        console.log("[withFollyCoroutinesFix] WARNING: Could not find closing 'end' in Podfile.");
+        return modConfig;
+      }
+
+      // Insert our snippet right before the final 'end'
+      const updated = podfile.slice(0, lastEndIndex) + follySnippet + podfile.slice(lastEndIndex);
+      fs.writeFileSync(podfilePath, updated);
+      console.log("[withFollyCoroutinesFix] SUCCESS: Injected FOLLY_CFG_NO_COROUTINES fix before final 'end'.");
       return modConfig;
     },
   ]);
@@ -46,7 +63,7 @@ module.exports = ({ config }) => {
     ...config,
     name: IS_DEV ? "TheScene (Dev)" : "TheScene",
     slug: "TheScene",
-    version: "1.0.15",
+    version: "1.0.16",
     orientation: "portrait",
     icon: "./assets/images/thescene-logo.png",
     scheme: "thescene",
