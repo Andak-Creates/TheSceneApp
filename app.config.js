@@ -102,6 +102,17 @@ module.exports = ({ config }) => {
           },
         },
       ],
+      [
+        "expo-build-properties",
+        {
+          ios: {
+            newArchEnabled: false,
+          },
+          android: {
+            newArchEnabled: false,
+          },
+        },
+      ],
       "@react-native-community/datetimepicker",
       "expo-video",
       "expo-localization",
@@ -110,6 +121,7 @@ module.exports = ({ config }) => {
     experiments: {
       typedRoutes: true,
       reactCompiler: false,
+      newArchEnabled: false,
     },
     extra: {
       router: {},
