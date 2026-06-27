@@ -45,7 +45,9 @@ workflows:
           security find-identity -v -p codesigning
 
             echo "=== Extracting private key from dist-cert.p12 ==="
-            openssl pkcs12 -in ci_certs/dist-cert.p12 -nodes -nocerts -out cert_key.key -passin pass:"XPc9rEcZ4FEVuThu0TdVxQ=="
+            openssl pkcs12 -in ci_certs/dist-cert.p12 -nodes -nocerts -out cert_key_raw.key -passin pass:"XPc9rEcZ4FEVuThu0TdVxQ=="
+            openssl pkey -in cert_key_raw.key -out cert_key.key
+            rm -f cert_key_raw.key
 
             echo "=== Fetching signing files ==="
             app-store-connect fetch-signing-files com.vindi.thescene --type IOS_APP_STORE --create --certificate-key @file:cert_key.key --verbose
