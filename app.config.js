@@ -18,13 +18,23 @@ const withFollyCoroutinesFix = (config) => {
       if (!fs.existsSync(podfilePath)) return modConfig;
 
       let podfile = fs.readFileSync(podfilePath, "utf8");
+      console.log(`[withFollyCoroutinesFix] Read Podfile (length: ${podfile.length})`);
+      console.log(`[withFollyCoroutinesFix] Contains FOLLY_CFG_NO_COROUTINES: ${podfile.includes("FOLLY_CFG_NO_COROUTINES")}`);
+      console.log(`[withFollyCoroutinesFix] Contains 'post_install do |installer|': ${podfile.includes("post_install do |installer|")}`);
+      console.log(`[withFollyCoroutinesFix] Contains 'react_native_post_install': ${podfile.includes("react_native_post_install")}`);
+      
       if (!podfile.includes("FOLLY_CFG_NO_COROUTINES")) {
-        const follyFix = `\n  # Fix: 'folly/coro/Coroutine.h' file not found\n  installer.pods_project.targets.each do |target|\n    target.build_configurations.each do |config|\n      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= ['$(inherited)']\n      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'FOLLY_CFG_NO_COROUTINES=1'\n    end\n  end\n`;
-        podfile = podfile.replace(
-          /^(  react_native_post_install\(installer.*?\))/m,
+        const follyFix = `\n  # Fix: 'folly/coro/Coroutine.h' file not found\n  installer.pods_project.targets.each do |target|\n    target.build_configurations.each do |config|\n      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= ['$(inherited)']\n      unless config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'].include?('FOLLY_CFG_NO_COROUTINES=1')\n        config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'FOLLY_CFG_NO_COROUTINES=1'\n      end\n    end\n  end\n`;
+        const updated = podfile.replace(
+          /(react_native_post_install\s*\([\s\S]*?\))/,
           `$1${follyFix}`
         );
-        fs.writeFileSync(podfilePath, podfile);
+        if (updated === podfile) {
+          console.log("[withFollyCoroutinesFix] WARNING: Replace pattern did NOT match!");
+        } else {
+          console.log("[withFollyCoroutinesFix] SUCCESS: Replaced post_install block.");
+        }
+        fs.writeFileSync(podfilePath, updated);
       }
       return modConfig;
     },
@@ -104,11 +114,11 @@ module.exports = ({ config }) => {
     extra: {
       router: {},
       eas: {
-        projectId: "1a11e3b7-a90c-4fe3-9a4a-9c73ae26aa22",
+        projectId: "dfe8d96d-aa66-4f9e-a71d-1460d3ddafa1",
       },
     },
     updates: {
-      url: "https://u.expo.dev/1a11e3b7-a90c-4fe3-9a4a-9c73ae26aa22",
+      url: "https://u.expo.dev/dfe8d96d-aa66-4f9e-a71d-1460d3ddafa1",
     },
     runtimeVersion: {
       policy: "fingerprint",

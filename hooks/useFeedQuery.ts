@@ -81,9 +81,9 @@ async function fetchFeedPage(
   // 4. Batch engagement queries
   const [likesRes, commentsRes, repostsRes, userLikesRes, userRepostsRes] =
     await Promise.all([
-      supabase.from("party_likes").select("party_id").in("party_id", partyIds),
-      supabase.from("party_comments").select("party_id").in("party_id", partyIds),
-      supabase.from("party_reposts").select("party_id").in("party_id", partyIds),
+      supabase.from("party_likes_count").select("party_id, count").in("party_id", partyIds),
+      supabase.from("party_comments_count").select("party_id, count").in("party_id", partyIds),
+      supabase.from("party_reposts_count").select("party_id, count").in("party_id", partyIds),
       userId
         ? supabase
             .from("party_likes")
@@ -108,11 +108,11 @@ async function fetchFeedPage(
   const repostedSet = new Set<string>();
 
   for (const r of likesRes.data || [])
-    likesMap[r.party_id] = (likesMap[r.party_id] || 0) + 1;
+    likesMap[r.party_id] = Number(r.count || 0);
   for (const r of commentsRes.data || [])
-    commentsMap[r.party_id] = (commentsMap[r.party_id] || 0) + 1;
+    commentsMap[r.party_id] = Number(r.count || 0);
   for (const r of repostsRes.data || [])
-    repostsMap[r.party_id] = (repostsMap[r.party_id] || 0) + 1;
+    repostsMap[r.party_id] = Number(r.count || 0);
   for (const r of userLikesRes.data || []) likedSet.add(r.party_id);
   for (const r of userRepostsRes.data || []) repostedSet.add(r.party_id);
 
