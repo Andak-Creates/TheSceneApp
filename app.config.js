@@ -46,7 +46,7 @@ module.exports = ({ config }) => {
     ...config,
     name: IS_DEV ? "TheScene (Dev)" : "TheScene",
     slug: "TheScene",
-    version: "1.0.12",
+    version: "1.0.14",
     orientation: "portrait",
     icon: "./assets/images/thescene-logo.png",
     scheme: "thescene",
