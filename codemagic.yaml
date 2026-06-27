@@ -44,8 +44,8 @@ workflows:
           echo "=== Listing keychain certificates after import ==="
           security find-identity -v -p codesigning
 
-          echo "=== Fetching signing files (using existing certificate, not creating a new one) ==="
-          app-store-connect fetch-signing-files com.vindi.thescene --type IOS_APP_STORE --verbose
+          echo "=== Fetching signing files ==="
+          app-store-connect fetch-signing-files com.vindi.thescene --type IOS_APP_STORE --create --verbose
 
           echo "=== Listing provisioning profiles directory BEFORE use-profiles ==="
           ls -la ~/Library/MobileDevice/Provisioning\ Profiles/ || echo "Directory does not exist or is empty"
