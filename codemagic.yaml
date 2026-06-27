@@ -48,7 +48,7 @@ workflows:
             openssl pkcs12 -in ci_certs/dist-cert.p12 -nodes -nocerts -out cert_key.key -passin pass:"XPc9rEcZ4FEVuThu0TdVxQ=="
 
             echo "=== Fetching signing files ==="
-            app-store-connect fetch-signing-files com.vindi.thescene --type IOS_APP_STORE --create --certificate-key cert_key.key --verbose
+            app-store-connect fetch-signing-files com.vindi.thescene --type IOS_APP_STORE --create --certificate-key @file:cert_key.key --verbose
             rm -f cert_key.key
 
           echo "=== Listing provisioning profiles directory BEFORE use-profiles ==="
