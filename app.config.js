@@ -93,9 +93,7 @@ module.exports = ({ config }) => {
       updates: {
         url: "https://u.expo.dev/dfe8d96d-aa66-4f9e-a71d-1460d3ddafa1",
       },
-      runtimeVersion: {
-        policy: "fingerprint",
-      },
+      runtimeVersion: "1.0.0",
     },
   };
 };
