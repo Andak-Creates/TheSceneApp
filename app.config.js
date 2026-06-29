@@ -63,17 +63,6 @@ module.exports = ({ config }) => {
             },
           },
         ],
-        [
-          "expo-build-properties",
-          {
-            ios: {
-              newArchEnabled: true,
-            },
-            android: {
-              newArchEnabled: true,
-            },
-          },
-        ],
         "@react-native-community/datetimepicker",
         "expo-video",
         "expo-localization",
@@ -82,18 +71,17 @@ module.exports = ({ config }) => {
       experiments: {
         typedRoutes: true,
         reactCompiler: false,
-        newArchEnabled: true,
       },
       extra: {
         router: {},
         eas: {
-          projectId: "dfe8d96d-aa66-4f9e-a71d-1460d3ddafa1",
+          projectId: "1a11e3b7-a90c-4fe3-9a4a-9c73ae26aa22",
         },
       },
       updates: {
-        url: "https://u.expo.dev/dfe8d96d-aa66-4f9e-a71d-1460d3ddafa1",
+        url: "https://u.expo.dev/1a11e3b7-a90c-4fe3-9a4a-9c73ae26aa22",
       },
-      runtimeVersion: "1.0.0",
+      runtimeVersion: "1.0.13",
     },
   };
 };

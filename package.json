@@ -10,7 +10,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "postinstall": "patch-package",
+
     "lint": "expo lint",
     "submit": "eas submit --platform android --profile production --latest",
     "build:submit": "eas build --profile production --platform android --auto-submit"
@@ -19,15 +19,13 @@
     "@expo/vector-icons": "^15.0.3",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/datetimepicker": "8.4.4",
-    "@react-navigation/bottom-tabs": "^7.4.0",
-    "@react-navigation/native": "^7.1.8",
-    "@sentry/react-native": "~7.2.0",
+
     "@supabase/supabase-js": "^2.90.1",
     "@tanstack/react-query": "^5.100.10",
     "base64-arraybuffer": "^1.0.2",
     "expo": "~54.0.35",
     "expo-blur": "~15.0.8",
-    "expo-build-properties": "~1.0.10",
+
     "expo-camera": "~17.0.10",
     "expo-constants": "~18.0.13",
     "expo-dev-client": "~6.0.21",
@@ -52,7 +50,7 @@
     "expo-video-thumbnails": "~10.0.8",
     "expo-web-browser": "~15.0.11",
     "nativewind": "^4.2.2",
-    "patch-package": "^8.0.1",
+
     "postcss": "^8.5.6",
     "react": "19.1.0",
     "react-dom": "19.1.0",
@@ -76,7 +74,7 @@
   "devDependencies": {
     "@types/react": "~19.1.10",
     "@types/react-dom": "~19.1.10",
-    "babel-preset-expo": "~54.0.10",
+
     "cross-env": "^10.1.0",
     "eslint": "~8.46.0",
     "eslint-config-expo": "~10.0.0",
