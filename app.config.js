@@ -6,7 +6,7 @@ module.exports = ({ config }) => {
       ...config,
       name: IS_DEV ? "TheScene (Dev)" : "TheScene",
       slug: "TheScene",
-      version: "1.0.17",
+      version: "1.0.18",
       orientation: "portrait",
       icon: "./assets/images/thescene-logo.png",
       scheme: "thescene",
@@ -75,13 +75,15 @@ module.exports = ({ config }) => {
       extra: {
         router: {},
         eas: {
-          projectId: "1a11e3b7-a90c-4fe3-9a4a-9c73ae26aa22",
+          projectId: "dfe8d96d-aa66-4f9e-a71d-1460d3ddafa1",
         },
       },
       updates: {
-        url: "https://u.expo.dev/1a11e3b7-a90c-4fe3-9a4a-9c73ae26aa22",
+        url: "https://u.expo.dev/dfe8d96d-aa66-4f9e-a71d-1460d3ddafa1",
       },
-      runtimeVersion: "1.0.13",
+      runtimeVersion: {
+        policy: "appVersion",
+      },
     },
   };
 };
