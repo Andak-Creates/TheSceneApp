@@ -35,6 +35,7 @@ interface Party {
   flyer_url: string;
   thumbnail_url?: string | null;
   date: string | null;
+  end_date?: string | null;
   city: string | null;
   ticket_price: number | null;
   currency_code: string;
@@ -123,14 +124,14 @@ export default function UserProfileScreen() {
         supabase
           .from("party_reposts")
           .select(
-            `party:parties(id, title, flyer_url, date, city, ticket_price, currency_code, date_tba, party_media(thumbnail_url, media_type, is_primary))`,
+            `party:parties(id, title, flyer_url, date, end_date, city, ticket_price, currency_code, date_tba, party_media(thumbnail_url, media_type, is_primary))`,
           )
           .eq("user_id", id)
           .order("created_at", { ascending: false }),
         supabase
           .from("tickets")
           .select(
-            `party:parties(id, title, flyer_url, date, city, ticket_price, currency_code, date_tba, party_media(thumbnail_url, media_type, is_primary))`,
+            `party:parties(id, title, flyer_url, date, end_date, city, ticket_price, currency_code, date_tba, party_media(thumbnail_url, media_type, is_primary))`,
           )
           .eq("user_id", id)
           .eq("payment_status", "completed"),
@@ -157,12 +158,19 @@ export default function UserProfileScreen() {
         .map((t: any) => t.party)
         .filter(Boolean)
         .map(extractThumb);
-      const upcoming = tickets.filter(
-        (p) => p.date_tba || !p.date || new Date(p.date) >= now,
-      );
-      const past = tickets.filter(
-        (p) => !p.date_tba && !!p.date && new Date(p.date) < now,
-      );
+      const isPartyActive = (p: any) => {
+        if (p.date_tba) return true;
+        if (p.end_date) return new Date(p.end_date) >= now;
+        if (p.date) {
+          const startDate = new Date(p.date);
+          const twelveHoursAgo = new Date(now.getTime() - 12 * 60 * 60 * 1000);
+          return startDate >= twelveHoursAgo;
+        }
+        return true;
+      };
+
+      const upcoming = tickets.filter(isPartyActive);
+      const past = tickets.filter((p) => !isPartyActive(p));
 
       // Fetch view counts in one batch for all unique party ids
       const allParties = [...reposts, ...tickets];

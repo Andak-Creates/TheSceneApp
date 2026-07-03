@@ -1054,12 +1054,13 @@ export default function PartyDetailScreen() {
   const displayPrice = ticketTiers.length > 0 ? minPrice : party.ticket_price;
   // ✅ Check if event is over
   const now = new Date();
-  const eventEndTime = party.end_date
-    ? new Date(party.end_date)
+  const eventEnded = party.date_tba
+    ? false
+    : party.end_date
+    ? now > new Date(party.end_date)
     : party.date
-      ? new Date(party.date)
-      : null;
-  const eventEnded = eventEndTime ? now > eventEndTime : false;
+    ? now.getTime() - new Date(party.date).getTime() > 12 * 60 * 60 * 1000
+    : false;
 
   return (
     <View className="flex-1 bg-[#191022]">

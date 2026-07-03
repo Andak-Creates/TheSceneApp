@@ -289,16 +289,19 @@ export default function HostProfileScreen() {
 
   const now = new Date();
 
-  const upcomingParties = allParties.filter((p) => {
+  const isPartyActive = (p: Party) => {
     if (p.date_tba) return true;
-    if (!p.date) return true;
-    return new Date(p.date) >= now;
-  });
+    if (p.end_date) return new Date(p.end_date) >= now;
+    if (p.date) {
+      const startDate = new Date(p.date);
+      const twelveHoursAgo = new Date(now.getTime() - 12 * 60 * 60 * 1000);
+      return startDate >= twelveHoursAgo;
+    }
+    return true;
+  };
 
-  const pastParties = allParties.filter((p) => {
-    if (p.date_tba || !p.date) return false;
-    return new Date(p.date) < now;
-  });
+  const upcomingParties = allParties.filter(isPartyActive);
+  const pastParties = allParties.filter((p) => !isPartyActive(p));
 
   const tabs: { key: TabType; label: string }[] = [
     { key: "upcoming", label: "Upcoming" },

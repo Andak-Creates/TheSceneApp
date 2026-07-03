@@ -28,6 +28,7 @@ interface Party {
   title: string;
   flyer_url: string;
   date: string;
+  end_date?: string | null;
   location: string;
   city: string;
   ticket_price: number;
@@ -43,6 +44,18 @@ interface Party {
     display_order: number;
   }[];
 }
+
+const isPartyActive = (p: Party, now: Date = new Date()) => {
+  if (p.date_tba) return true;
+  if (p.end_date) return new Date(p.end_date) >= now;
+  if (p.date) {
+    const startDate = new Date(p.date);
+    const twelveHoursAgo = new Date(now.getTime() - 12 * 60 * 60 * 1000);
+    return startDate >= twelveHoursAgo;
+  }
+  return true;
+};
+
 
 // ✅ ADD TIER INFO TO PARTY
 interface PartyWithTiers extends Party {
@@ -201,7 +214,8 @@ export default function HostDashboardScreen() {
   // Auto-select first upcoming party for scanner when data loads
   useEffect(() => {
     if (!selectedPartyForScan && parties.length > 0) {
-      const upcoming = parties.find(p => p.date_tba || new Date(p.date) >= new Date());
+      const now = new Date();
+      const upcoming = parties.find(p => isPartyActive(p, now));
       if (upcoming) setSelectedPartyForScan(upcoming.id);
     }
   }, [parties]);
@@ -218,7 +232,8 @@ export default function HostDashboardScreen() {
       const filteredParties = parties.filter(p => filterType === "all" || p.ownershipType === filterType);
       const totalRevenue = filteredParties.reduce((s, p) => s + p.total_revenue, 0);
       const totalTicketsSold = filteredParties.reduce((s, p) => s + p.total_sold, 0);
-      const upcomingCount = filteredParties.filter(p => p.date_tba || new Date(p.date) >= new Date()).length;
+      const now = new Date();
+      const upcomingCount = filteredParties.filter(p => isPartyActive(p, now)).length;
       const partyIds = filteredParties.map(p => p.id);
       let avgRating = 0;
       if (partyIds.length > 0) {
@@ -497,11 +512,12 @@ export default function HostDashboardScreen() {
   const renderPartiesTab = () => {
     const filteredParties = parties.filter(p => filterType === "all" || p.ownershipType === filterType);
     
+    const now = new Date();
     const upcomingParties = filteredParties.filter(
-      (p) => p.date_tba || (p.date && new Date(p.date) >= new Date()),
+      (p) => isPartyActive(p, now),
     );
     const pastParties = filteredParties.filter(
-      (p) => !p.date_tba && p.date && new Date(p.date) < new Date(),
+      (p) => !isPartyActive(p, now),
     );
 
     return (
@@ -643,8 +659,9 @@ export default function HostDashboardScreen() {
       );
     }
 
+    const now = new Date();
     const upcomingParties = parties.filter(
-      (p) => p.date_tba || (p.date && new Date(p.date) >= new Date()),
+      (p) => isPartyActive(p, now),
     );
     const selectedParty = parties.find((p) => p.id === selectedPartyForScan);
 

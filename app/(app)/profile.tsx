@@ -95,8 +95,19 @@ export default function ProfileScreen() {
       const primaryMedia = mediaRows.find((m: any) => m.is_primary) || mediaRows[0];
       return { ...p, thumbnail_url: primaryMedia?.media_type === "video" ? primaryMedia?.thumbnail_url ?? null : null };
     });
-    const hostedFuture = hostedAll.filter((p) => p.date_tba || !p.date || new Date(p.date) >= now);
-    const allUpcoming = [...hostedFuture, ...ticketParties.filter((p: any) => p.date_tba || !p.date || new Date(p.date) >= now)];
+    const isPartyActive = (p: any) => {
+      if (p.date_tba) return true;
+      if (p.end_date) return new Date(p.end_date) >= now;
+      if (p.date) {
+        const startDate = new Date(p.date);
+        const twelveHoursAgo = new Date(now.getTime() - 12 * 60 * 60 * 1000);
+        return startDate >= twelveHoursAgo;
+      }
+      return true;
+    };
+
+    const hostedFuture = hostedAll.filter(isPartyActive);
+    const allUpcoming = [...hostedFuture, ...ticketParties.filter(isPartyActive)];
     const seen = new Set<string>();
     const deduped = allUpcoming.filter((p: any) => { if (seen.has(p.id)) return false; seen.add(p.id); return true; });
     const { data: bookmarkData } = await supabase
@@ -119,8 +130,8 @@ export default function ProfileScreen() {
     const addViews = (arr: any[]) => arr.map((p) => ({ ...p, views_count: viewsMap[p.id] || 0 }));
     const { data: userReviews } = await supabase.from("reviews").select("party_id").eq("reviewer_id", user.id);
     const reviewedPartyIds = new Set((userReviews || []).map((r: any) => r.party_id));
-    const ticketPast = ticketParties.filter((p: any) => !p.date_tba && p.date && new Date(p.date) < now);
-    const hostedPast = hostedAll.filter((p: any) => !p.date_tba && p.date && new Date(p.date) < now);
+    const ticketPast = ticketParties.filter((p: any) => !isPartyActive(p));
+    const hostedPast = hostedAll.filter((p: any) => !isPartyActive(p));
     const allPast = [...ticketPast, ...hostedPast];
     const pastSeen = new Set<string>();
     const dedupedPast = allPast.filter((p: any) => { if (pastSeen.has(p.id)) return false; pastSeen.add(p.id); return true; });
