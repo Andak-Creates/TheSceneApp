@@ -163,21 +163,34 @@ export default function HostDashboardScreen() {
       partiesData = data || [];
     }
 
-    const parties = await Promise.all(
-      partiesData.map(async (party) => {
-        const { data: tiers } = await supabase.from("ticket_tiers").select("*").eq("party_id", party.id).eq("is_active", true);
-        const totalTickets = tiers?.reduce((s, t) => s + t.quantity, 0) || 0;
-        const totalSold    = tiers?.reduce((s, t) => s + (t.quantity_sold || 0), 0) || 0;
-        const totalRevenue = tiers?.reduce((s, t) => s + t.price * (t.quantity_sold || 0), 0) || 0;
-        let ownershipType: "owned" | "admin" = "owned";
-        if (party.host_profile_id) {
-          if (adminIds.includes(party.host_profile_id) && !ownedIds.includes(party.host_profile_id)) ownershipType = "admin";
-        } else if (party.host_id !== user.id) {
-          ownershipType = "admin";
-        }
-        return { ...party, total_tickets: totalTickets, total_sold: totalSold, total_revenue: totalRevenue, ownershipType };
-      }),
-    );
+    const partyIds = partiesData.map((p) => p.id);
+    let tiersDataAll: any[] = [];
+    let ticketsDataAll: any[] = [];
+    if (partyIds.length > 0) {
+      const [tiersRes, ticketsRes] = await Promise.all([
+        supabase.from("ticket_tiers").select("*").in("party_id", partyIds).eq("is_active", true),
+        supabase.from("tickets").select("party_id, total_paid").in("party_id", partyIds).eq("payment_status", "completed"),
+      ]);
+      tiersDataAll = tiersRes.data || [];
+      ticketsDataAll = ticketsRes.data || [];
+    }
+
+    const parties = partiesData.map((party) => {
+      const partyTiers = tiersDataAll.filter((t) => t.party_id === party.id);
+      const partyTickets = ticketsDataAll.filter((t) => t.party_id === party.id);
+      
+      const totalTickets = partyTiers.reduce((s, t) => s + t.quantity, 0);
+      const totalSold    = partyTiers.reduce((s, t) => s + (t.quantity_sold || 0), 0);
+      const totalRevenue = partyTickets.reduce((s, t) => s + (t.total_paid || 0), 0);
+      
+      let ownershipType: "owned" | "admin" = "owned";
+      if (party.host_profile_id) {
+        if (adminIds.includes(party.host_profile_id) && !ownedIds.includes(party.host_profile_id)) ownershipType = "admin";
+      } else if (party.host_id !== user.id) {
+        ownershipType = "admin";
+      }
+      return { ...party, total_tickets: totalTickets, total_sold: totalSold, total_revenue: totalRevenue, ownershipType };
+    });
 
     const { data: balanceData } = await supabase.from("host_balances").select("*").eq("user_id", user.id).single();
     const balance: HostBalance = balanceData || { total_earned: 0, total_withdrawn: 0, current_balance: 0, pending_payout: 0, currency: "NGN" };

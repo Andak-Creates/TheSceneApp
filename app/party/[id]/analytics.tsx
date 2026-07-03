@@ -142,8 +142,9 @@ export default function PartyAnalyticsScreen() {
       const tierTickets = tickets?.filter((t) => t.ticket_tier_id === tier.id) || [];
       const tierCheckIns = tierTickets.reduce((sum, ticket) =>
         sum + (checkIns?.filter((ci) => ci.ticket_id === ticket.id).length || 0), 0);
+      const tierRevenue = tierTickets.reduce((sum, ticket) => sum + (ticket.total_paid || 0), 0);
       return { id: tier.id, name: tier.name, price: tier.price, quantity: tier.quantity,
-        sold: tier.quantity_sold || 0, revenue: tier.price * (tier.quantity_sold || 0), checkedIn: tierCheckIns };
+        sold: tier.quantity_sold || 0, revenue: tierRevenue, checkedIn: tierCheckIns };
     });
 
     const totalCapacity = tierStats.reduce((s, t) => s + t.quantity, 0);
