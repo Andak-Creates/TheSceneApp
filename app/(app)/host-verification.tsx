@@ -37,7 +37,6 @@ export default function HostVerificationScreen() {
   const [fullName, setFullName] = useState("");
   const [idType, setIdType] = useState("");
   const [idImageUri, setIdImageUri] = useState<string | null>(null);
-  const [utilityBillUri, setUtilityBillUri] = useState<string | null>(null);
   const [address, setAddress] = useState("");
   const [phone, setPhone] = useState("");
   const [rejectionReason, setRejectionReason] = useState<string | null>(null);
@@ -88,7 +87,6 @@ export default function HostVerificationScreen() {
         setFullName(verificationData.full_name || profile?.full_name || "");
         setIdType(verificationData.id_type || "");
         setIdImageUri(verificationData.id_image_url || null);
-        setUtilityBillUri(verificationData.utility_bill_url || null);
         setAddress(verificationData.address || "");
         setPhone(verificationData.phone || "");
         setRejectionReason(verificationData.rejection_reason || null);
@@ -154,11 +152,10 @@ export default function HostVerificationScreen() {
       !fullName.trim() ||
       !idType.trim() ||
       !idImageUri ||
-      !utilityBillUri ||
       !address.trim() ||
       !phone.trim()
     ) {
-      setError("Please fill in all fields, upload your ID photo, and upload a utility bill");
+      setError("Please fill in all fields and upload your ID photo");
       return;
     }
     setSubmitting(true);
@@ -169,11 +166,6 @@ export default function HostVerificationScreen() {
         ? idImageUri
         : await uploadVerificationImage(idImageUri, "id");
 
-      // 2. Upload Utility Bill
-      const utilityBillUrl = utilityBillUri.startsWith("http")
-        ? utilityBillUri
-        : await uploadVerificationImage(utilityBillUri, "utility_bill");
-
       const { error: upsertError } = await supabase
         .from("host_verifications")
         .upsert(
@@ -182,7 +174,6 @@ export default function HostVerificationScreen() {
             full_name: fullName.trim(),
             id_type: idType.trim(),
             id_image_url: idImageUrl,
-            utility_bill_url: utilityBillUrl,
             address: address.trim(),
             phone: phone.trim(),
             status: "pending",
@@ -395,37 +386,6 @@ export default function HostVerificationScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Utility Bill */}
-            <View className="mb-5">
-              <Text className="text-white font-semibold mb-1">Utility Bill *</Text>
-              <Text className="text-gray-500 text-xs mb-2">
-                A recent utility bill (electricity, water, etc.) showing your name and address.
-              </Text>
-              <TouchableOpacity
-                onPress={() => pickImage(setUtilityBillUri)}
-                className="bg-white/10 border border-white/20 rounded-xl p-4 items-center justify-center min-h-[110]"
-              >
-                {utilityBillUri ? (
-                  <View className="w-full">
-                    <Image
-                      source={{ uri: utilityBillUri.startsWith("http") ? supabase.storage.from("flyers").getPublicUrl(utilityBillUri).data.publicUrl : utilityBillUri }}
-                      className="w-full h-56 rounded-lg"
-                      resizeMode="contain"
-                    />
-                    <View className="flex-row items-center justify-center mt-2 gap-1">
-                      <Ionicons name="checkmark-circle" size={14} color="#22c55e" />
-                      <Text className="text-green-400 text-xs font-semibold">Utility bill uploaded — tap to change</Text>
-                    </View>
-                  </View>
-                ) : (
-                  <>
-                    <Ionicons name="document-text-outline" size={36} color="#666" />
-                    <Text className="text-gray-400 mt-2 text-sm">Tap to upload utility bill</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
-
             {/* Address */}
             <View className="mb-5">
               <Text className="text-white font-semibold mb-2">Home Address *</Text>
@@ -460,7 +420,6 @@ export default function HostVerificationScreen() {
                 { label: "Full legal name", done: fullName.trim().length > 2 },
                 { label: "ID type selected", done: !!idType },
                 { label: "ID photo uploaded", done: !!idImageUri },
-                { label: "Utility bill uploaded", done: !!utilityBillUri },
                 { label: "Home address", done: address.trim().length > 5 },
                 { label: "Phone number", done: phone.trim().length === 11, error: phone.trim().length > 11 },
               ].map((item) => (

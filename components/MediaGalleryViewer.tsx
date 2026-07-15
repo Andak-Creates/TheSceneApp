@@ -11,6 +11,8 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import DraggableFlatList, { RenderItemParams, ScaleDecorator } from "react-native-draggable-flatlist";
 import { useAudioStore } from "../stores/audioStore";
 
 import { getOptimizedUrl } from "../lib/cloudinary";
@@ -33,6 +35,7 @@ interface MediaGalleryViewerProps {
   aspectRatio?: number;
   showDelete?: boolean;
   onDelete?: (id: string) => void;
+  onReorder?: (reorderedIds: string[]) => void;
   isActive?: boolean;
   instanceId?: string;
 }
@@ -44,6 +47,7 @@ export default function MediaGalleryViewer({
   aspectRatio = 4 / 5,
   showDelete = false,
   onDelete,
+  onReorder,
   isActive = true,
   instanceId,
 }: MediaGalleryViewerProps) {
@@ -226,51 +230,109 @@ export default function MediaGalleryViewer({
 
         {/* Thumbnail Strip */}
         {!onPress && filteredMedia.length > 1 && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            className="mt-3 px-4"
-          >
-            {filteredMedia.map((item, index) => (
-              <TouchableOpacity
-                key={item.id}
-                onPress={() => {
-                  flatListRef.current?.scrollToIndex({ index, animated: true });
-                  setCurrentIndex(index);
+          onReorder ? (
+            <GestureHandlerRootView style={{ marginTop: 12, paddingHorizontal: 16 }}>
+              <DraggableFlatList
+                horizontal
+                data={filteredMedia}
+                keyExtractor={(item) => item.id}
+                onDragEnd={({ data }) => {
+                  onReorder(data.map((i) => i.id));
                 }}
-                className={`mr-2 rounded-lg overflow-hidden ${
-                  index === currentIndex ? "border-2 border-purple-500" : ""
-                }`}
-              >
-                {item.media_type === "video" && !item.thumbnail_url ? (
-                  // No thumbnail yet — show a dark placeholder with play icon
-                  <View className="w-16 h-16 bg-gray-800 items-center justify-center">
-                    <Ionicons name="videocam" size={20} color="#666" />
-                  </View>
-                ) : (
-                  <Image
-                    source={{
-                      uri: getOptimizedUrl(
-                        item.media_type === "video"
-                          ? item.thumbnail_url!
-                          : item.media_url,
-                        "image"
-                      ),
-                    }}
-                    style={{ width: 64, height: 64, backgroundColor: "#1a1a1a" }}
-                    contentFit="cover"
-                  />
-                )}
-                {item.media_type === "video" && (
-                  <View className="absolute inset-0 items-center justify-center">
-                    <View className="bg-black/50 rounded-full p-1">
-                      <Ionicons name="play" size={12} color="#fff" />
+                showsHorizontalScrollIndicator={false}
+                renderItem={({ item, index = 0, drag, isActive: isDragging }: RenderItemParams<MediaItem>) => {
+                  const isFlyer = item.id === "flyer_id";
+                  return (
+                  <ScaleDecorator>
+                    <TouchableOpacity
+                      onLongPress={isFlyer ? undefined : drag}
+                      disabled={isDragging}
+                      onPress={() => {
+                        flatListRef.current?.scrollToIndex({ index, animated: true });
+                        setCurrentIndex(index);
+                      }}
+                      className={`mr-2 rounded-lg overflow-hidden ${
+                        index === currentIndex ? "border-2 border-purple-500" : ""
+                      } ${isDragging ? "opacity-70" : ""}`}
+                    >
+                      {item.media_type === "video" && !item.thumbnail_url ? (
+                        <View className="w-16 h-16 bg-gray-800 items-center justify-center">
+                          <Ionicons name="videocam" size={20} color="#666" />
+                        </View>
+                      ) : (
+                        <Image
+                          source={{
+                            uri: getOptimizedUrl(
+                              item.media_type === "video" ? item.thumbnail_url! : item.media_url,
+                              "image"
+                            ),
+                          }}
+                          style={{ width: 64, height: 64, backgroundColor: "#1a1a1a" }}
+                          contentFit="cover"
+                        />
+                      )}
+                      {item.media_type === "video" && (
+                        <View className="absolute inset-0 items-center justify-center">
+                          <View className="bg-black/50 rounded-full p-1">
+                            <Ionicons name="play" size={12} color="#fff" />
+                          </View>
+                        </View>
+                      )}
+                      {/* Drag handle indicator */}
+                      {!isFlyer && (
+                        <View className="absolute bottom-0.5 right-0.5 bg-black/60 rounded-full p-0.5">
+                          <Ionicons name="menu" size={10} color="#fff" />
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  </ScaleDecorator>
+                )}}
+              />
+            </GestureHandlerRootView>
+          ) : (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              className="mt-3 px-4"
+            >
+              {filteredMedia.map((item, index) => (
+                <TouchableOpacity
+                  key={item.id}
+                  onPress={() => {
+                    flatListRef.current?.scrollToIndex({ index, animated: true });
+                    setCurrentIndex(index);
+                  }}
+                  className={`mr-2 rounded-lg overflow-hidden ${
+                    index === currentIndex ? "border-2 border-purple-500" : ""
+                  }`}
+                >
+                  {item.media_type === "video" && !item.thumbnail_url ? (
+                    <View className="w-16 h-16 bg-gray-800 items-center justify-center">
+                      <Ionicons name="videocam" size={20} color="#666" />
                     </View>
-                  </View>
-                )}
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+                  ) : (
+                    <Image
+                      source={{
+                        uri: getOptimizedUrl(
+                          item.media_type === "video" ? item.thumbnail_url! : item.media_url,
+                          "image"
+                        ),
+                      }}
+                      style={{ width: 64, height: 64, backgroundColor: "#1a1a1a" }}
+                      contentFit="cover"
+                    />
+                  )}
+                  {item.media_type === "video" && (
+                    <View className="absolute inset-0 items-center justify-center">
+                      <View className="bg-black/50 rounded-full p-1">
+                        <Ionicons name="play" size={12} color="#fff" />
+                      </View>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )
         )}
       </View>
 

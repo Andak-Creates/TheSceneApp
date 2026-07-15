@@ -98,17 +98,41 @@ export function usePushNotifications() {
       const token = tokenData.data;
       if (!token || !user) return;
 
-      await supabase.from("push_tokens").upsert(
-        {
-          user_id: user.id,
-          token,
-          device_type: Platform.OS,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "user_id,token" },
-      );
+      const { data: existing } = await supabase
+        .from("push_tokens")
+        .select("id")
+        .eq("token", token)
+        .maybeSingle();
 
-      console.log("Push token registered:", token);
+      let error = null;
+
+      if (existing) {
+        const { error: updateError } = await supabase
+          .from("push_tokens")
+          .update({
+            user_id: user.id,
+            device_type: Platform.OS,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existing.id);
+        error = updateError;
+      } else {
+        const { error: insertError } = await supabase
+          .from("push_tokens")
+          .insert({
+            user_id: user.id,
+            token,
+            device_type: Platform.OS,
+            updated_at: new Date().toISOString(),
+          });
+        error = insertError;
+      }
+
+      if (error) {
+        console.error("Supabase push token save error:", error);
+      } else {
+        console.log("Push token registered and saved to database:", token);
+      }
     } catch (error) {
       console.error("Error registering push token:", error);
     }

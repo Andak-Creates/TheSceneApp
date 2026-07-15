@@ -20,7 +20,9 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Image,
 } from "react-native";
+import { useRef } from "react";
 import { getUserCurrency } from "../../lib/currency";
 import { uploadPartyMedia } from "../../lib/media";
 import { supabase } from "../../lib/supabase";
@@ -94,6 +96,7 @@ const safeParseInt = (value: string): number => {
 
 export default function CreatePartyScreen() {
   const { user } = useAuthStore();
+  const scrollViewRef = useRef<ScrollView>(null);
 
   const [currentStep, setCurrentStep] = useState(1);
   const [publishing, setPublishing] = useState(false);
@@ -155,9 +158,21 @@ export default function CreatePartyScreen() {
       quality: 0.7,
       base64: true,
     });
-    if (!result.canceled && result.assets[0].uri) {
+    if (!result.canceled && result.assets && result.assets[0].uri) {
       setNewProfileAvatarUri(result.assets[0].uri);
       setNewProfileAvatarBase64(result.assets[0].base64 || null);
+    }
+  };
+
+  const handlePickFlyer = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: false, // Let them upload the full flyer aspect ratio
+      quality: 0.8,
+      base64: false,
+    });
+    if (!result.canceled && result.assets && result.assets[0].uri) {
+      setFlyerImage(result.assets[0].uri);
     }
   };
 
@@ -299,6 +314,8 @@ export default function CreatePartyScreen() {
     setShowEndDatePicker(false);
     setShowEndTimePicker(false);
     setDressCode("");
+    setCommunityLink("");
+    setCommunityPlatform("WhatsApp");
     setSelectedGenres([]);
     setSelectedVibes([]);
     setTicketTiers([
@@ -343,6 +360,9 @@ export default function CreatePartyScreen() {
   const [locationTBA, setLocationTBA] = useState(false);
 
   const [dressCode, setDressCode] = useState("");
+  const [communityLink, setCommunityLink] = useState("");
+  const [communityPlatform, setCommunityPlatform] = useState("whatsapp");
+  const [showPlatformModal, setShowPlatformModal] = useState(false);
 
   const formatDate = (date: Date) => {
     const year = date.getFullYear();
@@ -411,8 +431,8 @@ export default function CreatePartyScreen() {
   const validateStep = (step: number): string | null => {
     switch (step) {
       case 1:
-        if (mediaGallery.length === 0)
-          return "Please upload at least one image or video";
+        if (!flyerImage)
+          return "Please upload a party flyer (cover image)";
         break;
       case 2:
         if (!title.trim()) return "Please enter a party title";
@@ -460,17 +480,23 @@ export default function CreatePartyScreen() {
     }
     setError("");
     setCurrentStep(currentStep + 1);
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: 0, animated: false });
+    }, 0);
   };
 
   const handleBack = () => {
     setError("");
     setCurrentStep(currentStep - 1);
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: 0, animated: false });
+    }, 0);
   };
 
   const handlePublish = async () => {
     if (!user) return;
-    if (mediaGallery.length === 0) {
-      setError("Please upload at least one image");
+    if (!flyerImage) {
+      setError("Please upload a party flyer");
       return;
     }
 
@@ -495,9 +521,14 @@ export default function CreatePartyScreen() {
         }
       }
 
-      const primaryMedia =
-        uploadedMedia.find((m) => m.isPrimary) || uploadedMedia[0];
-      const primaryUrl = primaryMedia?.uploadedUrl || "";
+      // Upload flyer
+      let finalFlyerUrl = "";
+      try {
+        const flyerResult = await uploadPartyMedia(user.id, flyerImage, "image");
+        finalFlyerUrl = flyerResult.url;
+      } catch (err) {
+        throw new Error("Failed to upload the party flyer.");
+      }
 
       let partyDateTimeISO = null;
       let partyEndDateTimeISO = null;
@@ -535,7 +566,7 @@ export default function CreatePartyScreen() {
           host_id: user.id,
           title: title.trim(),
           description: description.trim() || null,
-          flyer_url: primaryUrl,
+          flyer_url: finalFlyerUrl,
           date: partyDateTimeISO,
           end_date: partyEndDateTimeISO,
           date_tba: dateTBA,
@@ -547,6 +578,8 @@ export default function CreatePartyScreen() {
           ticket_price: lowestPrice,
           currency_code: currency,
           dress_code: dressCode.trim() || null,
+          community_link: communityLink.trim() || null,
+          community_platform: communityPlatform.trim(),
           ticket_quantity: totalQuantity,
           tickets_sold: 0,
           music_genres: selectedGenres,
@@ -655,6 +688,7 @@ export default function CreatePartyScreen() {
       </View>
 
       <ScrollView
+        ref={scrollViewRef}
         className="flex-1 pb-8"
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
@@ -680,9 +714,39 @@ export default function CreatePartyScreen() {
                   Visuals
                 </Text>
                 <Text className="text-gray-400 text-base">
-                  Add images and videos to showcase your event. First item will
-                  be the cover.
+                  Add a main flyer and a gallery to showcase your event vibe.
                 </Text>
+              </View>
+
+              <View className="mb-6">
+                <Text className="text-white font-bold text-lg mb-3">Main Flyer *</Text>
+                <Text className="text-gray-400 text-sm mb-4">This will be the cover image for your party.</Text>
+                <TouchableOpacity onPress={handlePickFlyer} className="items-center justify-center bg-white/5 border-2 border-dashed border-white/20 rounded-3xl w-full" style={{ aspectRatio: 4/5 }}>
+                  {flyerImage ? (
+                    <Image
+                      source={{ uri: flyerImage }}
+                      className="w-full h-full rounded-3xl"
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View className="items-center justify-center p-6">
+                      <Ionicons name="image-outline" size={48} color="#a855f7" />
+                      <Text className="text-purple-400 font-bold mt-4">Upload Flyer</Text>
+                      <Text className="text-gray-500 text-xs text-center mt-2">Recommended: 4:5 vertical ratio</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+                {flyerImage && (
+                  <TouchableOpacity onPress={() => setFlyerImage(null)} className="absolute top-4 right-4 bg-black/60 p-2 rounded-full">
+                    <Ionicons name="trash" size={20} color="#ff4444" />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              <View className="h-px bg-white/10 w-full my-6" />
+
+              <View className="mb-4">
+                 <Text className="text-gray-400 text-sm">You can optionally add vibe videos and extra photos to a swiping gallery.</Text>
               </View>
               <MediaGalleryUploader
                 initialMedia={mediaGallery}
@@ -1207,6 +1271,38 @@ export default function CreatePartyScreen() {
                   )}
                 </View>
               </View>
+
+              {/* Community Link */}
+              <View className="mb-4 pt-4 border-t border-white/10">
+                <Text className="text-white text-sm font-semibold mb-1">
+                  Join Community Link (Optional)
+                </Text>
+                <Text className="text-gray-400 text-xs mb-3">
+                  Let attendees join your group chat after purchasing a ticket.
+                </Text>
+
+                <View className="flex-row gap-3 mb-3">
+                  <TouchableOpacity
+                    onPress={() => setShowPlatformModal(true)}
+                    className="w-1/3 bg-white/10 border border-white/20 rounded-xl px-4 py-3 flex-row items-center justify-between"
+                  >
+                    <Text className={communityPlatform ? "text-white capitalize" : "text-gray-500"}>
+                      {communityPlatform || "Select..."}
+                    </Text>
+                    <Ionicons name="chevron-down" size={16} color="#666" />
+                  </TouchableOpacity>
+                  <View className="flex-1">
+                    <TextInput
+                      className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white"
+                      placeholder="https://chat.whatsapp.com/..."
+                      placeholderTextColor="#666"
+                      value={communityLink}
+                      onChangeText={setCommunityLink}
+                      autoCapitalize="none"
+                    />
+                  </View>
+                </View>
+              </View>
             </View>
           )}
 
@@ -1436,11 +1532,12 @@ export default function CreatePartyScreen() {
                 </Text>
               </View>
 
-              {mediaGallery.length > 0 && (
-                <ExpoImage
-                  source={{ uri: mediaGallery[0].thumbnailUri || mediaGallery[0].uri }}
+              {flyerImage && (
+                <Image
+                  source={{ uri: flyerImage }}
                   className="w-full rounded-3xl overflow-hidden mb-6 border border-white/5"
                   style={{ aspectRatio: 4 / 5 }}
+                  resizeMode="cover"
                 />
               )}
 
@@ -1637,6 +1734,32 @@ export default function CreatePartyScreen() {
             </View>
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Platform Selector Modal */}
+      <Modal visible={showPlatformModal} transparent animationType="fade">
+        <View className="flex-1 justify-center items-center bg-black/80 px-6">
+          <View className="bg-[#191022] w-full rounded-3xl p-6 border border-white/10">
+            <Text className="text-white text-lg font-bold mb-4">Select Platform</Text>
+            <View className="gap-2">
+              {['whatsapp', 'telegram', 'snapchat', 'discord', 'other'].map((p) => (
+                <TouchableOpacity
+                  key={p}
+                  onPress={() => {
+                    setCommunityPlatform(p);
+                    setShowPlatformModal(false);
+                  }}
+                  className={`p-4 rounded-xl border ${communityPlatform === p ? "bg-purple-600/20 border-purple-500" : "bg-white/5 border-white/10"}`}
+                >
+                  <Text className="text-white capitalize font-semibold">{p}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity onPress={() => setShowPlatformModal(false)} className="mt-4 p-4 items-center">
+              <Text className="text-gray-400 font-bold">Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
     </KeyboardAvoidingView>
   );

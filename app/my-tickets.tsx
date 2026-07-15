@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
   View,
   Image,
+  Linking,
 } from "react-native";
 import QRCode from "react-qr-code";
 import { supabase } from "../lib/supabase";
@@ -40,6 +41,8 @@ interface Ticket {
     date_tba?: boolean;
     location_tba?: boolean;
     currency_code?: string;
+    community_link?: string | null;
+    community_platform?: string | null;
     host: {
       username: string;
     };
@@ -91,6 +94,8 @@ export default function MyTicketsScreen() {
             location_tba,
             city,
             currency_code,
+            community_link,
+            community_platform,
             host:profiles!host_id (username),
             host_profile:host_profiles!host_profile_id (name),
             party_media(media_url, media_type, thumbnail_url, is_primary)
@@ -660,9 +665,9 @@ export default function MyTicketsScreen() {
             </View>
 
             {/* Action Buttons */}
-            <View className="flex-row gap-3">
+            <View className="flex-row gap-3 flex-wrap">
               <TouchableOpacity
-                className="flex-1 bg-purple-600 py-3 rounded-xl items-center"
+                className="flex-1 min-w-[140px] bg-purple-600 py-3 rounded-xl items-center"
                 onPress={() =>
                   router.push({
                     pathname: "/party/[id]",
@@ -674,11 +679,26 @@ export default function MyTicketsScreen() {
               </TouchableOpacity>
 
               <TouchableOpacity 
-                className="flex-1 bg-white/10 py-3 rounded-xl items-center"
+                className="flex-1 min-w-[140px] bg-white/10 py-3 rounded-xl items-center"
                 onPress={() => handleShareTicket(ticket)}
               >
                 <Text className="text-white font-semibold">Share Ticket</Text>
               </TouchableOpacity>
+              
+              {ticket.party.community_link && (
+                <TouchableOpacity 
+                  className="w-full bg-[#25d366]/20 border border-[#25d366]/50 py-3 rounded-xl items-center flex-row justify-center mt-1"
+                  onPress={() => {
+                     const url = ticket.party.community_link!;
+                     Linking.openURL(url).catch(() => Alert.alert('Error', 'Cannot open link'));
+                  }}
+                >
+                  <Ionicons name="chatbubbles-outline" size={18} color="#4ade80" />
+                  <Text className="text-[#4ade80] font-bold ml-2">
+                    Join {ticket.party.community_platform || "Community"}
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         )}

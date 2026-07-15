@@ -8,7 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { decode } from "base64-arraybuffer";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
@@ -86,6 +86,8 @@ interface Party {
     display_order: number;
     thumbnail_url?: string;
   }[];
+  community_link?: string | null;
+  community_platform?: string | null;
   has_ticket?: boolean;
   has_reviewed?: boolean;
   show_ticket_count?: boolean;
@@ -171,6 +173,8 @@ export default function PartyDetailScreen() {
   const [editedDateTba, setEditedDateTba] = useState(false);
   const [editedLocationTba, setEditedLocationTba] = useState(false);
   const [editedDressCode, setEditedDressCode] = useState("");
+  const [editedCommunityLink, setEditedCommunityLink] = useState("");
+  const [editedCommunityPlatform, setEditedCommunityPlatform] = useState("");
   const [saving, setSaving] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
@@ -655,6 +659,8 @@ export default function PartyDetailScreen() {
           date_tba: editedDateTba,
           location_tba: editedLocationTba,
           dress_code: editedDressCode.trim() || null,
+          community_link: editedCommunityLink.trim() || null,
+          community_platform: editedCommunityPlatform.trim(),
         })
         .eq("id", partyId);
 
@@ -697,6 +703,8 @@ export default function PartyDetailScreen() {
       setEditedDateTba(party.date_tba || false);
       setEditedLocationTba(party.location_tba || false);
       setEditedDressCode(party.dress_code || "");
+      setEditedCommunityLink(party.community_link || "");
+      setEditedCommunityPlatform(party.community_platform || "whatsapp");
     }
     setIsEditing(!isEditing);
   };
@@ -757,11 +765,9 @@ export default function PartyDetailScreen() {
         fileExt = asset.uri.split(".").pop()?.toLowerCase() || "mov";
         contentType = fileExt === "mp4" ? "video/mp4" : "video/quicktime";
       } else {
-        const base64 = await FileSystem.readAsStringAsync(asset.uri, {
-          encoding: "base64" as any,
-        });
-        uploadData = decode(base64);
-        fileExt = "jpg";
+        const response = await fetch(asset.uri);
+        uploadData = await response.arrayBuffer();
+        fileExt = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
         contentType = "image/jpeg";
       }
 
@@ -786,15 +792,13 @@ export default function PartyDetailScreen() {
             { time: 1000, quality: 0.6 },
           );
 
-          const thumbBase64 = await FileSystem.readAsStringAsync(thumbUri, {
-            encoding: "base64" as any,
-          });
-
+          const thumbResponse = await fetch(thumbUri);
+          const thumbData = await thumbResponse.arrayBuffer();
           const thumbPath = `party-media/${partyId}/thumb_${Date.now()}.jpg`;
 
           const { error: thumbUploadError } = await supabase.storage
             .from("flyers")
-            .upload(thumbPath, decode(thumbBase64), {
+            .upload(thumbPath, thumbData, {
               contentType: "image/jpeg",
               upsert: true,
             });
@@ -831,7 +835,55 @@ export default function PartyDetailScreen() {
     }
   };
 
+  const handleReorderMedia = async (reorderedIds: string[]) => {
+    // filter out the flyer if we injected it with a fake id
+    const mediaIds = reorderedIds.filter(id => id !== "flyer_id");
+    
+    // optimistically update local state
+    const key = queryKeys.partyDetail(partyId);
+    queryClient.setQueryData(key, (old: Party | undefined) => {
+      if (!old || !old.media) return old;
+      
+      const newMedia = [...old.media];
+      newMedia.sort((a, b) => {
+        const aIndex = mediaIds.indexOf(a.id);
+        const bIndex = mediaIds.indexOf(b.id);
+        // if not found in mediaIds (e.g. newly added), put at end
+        if (aIndex === -1) return 1;
+        if (bIndex === -1) return -1;
+        return aIndex - bIndex;
+      });
+      
+      return { ...old, media: newMedia };
+    });
+
+    try {
+      const updatePromises = mediaIds.map((id, index) =>
+        supabase
+          .from("party_media")
+          .update({ display_order: index })
+          .eq("id", id)
+          .eq("party_id", partyId)
+      );
+
+      const results = await Promise.all(updatePromises);
+      const errors = results.filter((res) => res.error);
+      if (errors.length > 0) throw errors[0].error;
+      
+      // invalidate to be sure
+      invalidateParty();
+    } catch (error) {
+      console.error("Error reordering media:", error);
+      Alert.alert("Error", "Failed to save media order");
+      invalidateParty(); // revert
+    }
+  };
+
   const handleDeleteMedia = async (mediaId: string) => {
+    if (mediaId === "flyer_id") {
+      Alert.alert("Cannot Delete", "The main flyer cannot be deleted here. Please edit the party to change the flyer.");
+      return;
+    }
     Alert.alert(
       "Remove Media",
       "Are you sure you want to remove this image/video?",
@@ -854,7 +906,7 @@ export default function PartyDetailScreen() {
               await invalidateParty();
             } catch (error) {
               console.error("Error deleting media:", error);
-              Alert.alert("Error", "Failed to remove media");
+              Alert.alert("Error", "Failed to delete media");
             } finally {
               setSaving(false);
             }
@@ -1177,39 +1229,59 @@ export default function PartyDetailScreen() {
 
         {/* Media Gallery */}
         <View className="relative">
-          {party.media && party.media.length > 0 ? (
-            <MediaGalleryViewer
-              media={party.media}
-              showDelete={isEditing}
-              onDelete={handleDeleteMedia}
-              isActive={isFocused}
-            />
-          ) : party.flyer_url &&
-            (party.flyer_url.startsWith("http") ||
-              party.flyer_url.startsWith("https")) ? (
-            <View style={{ aspectRatio: 4 / 5 }} className="w-full relative">
-              <Image
-                source={{ uri: party.flyer_url }}
-                style={{ width: "100%", height: "100%" }}
-                contentFit="cover"
-              />
-              <LinearGradient
-                colors={[
-                  "transparent",
-                  "rgba(25,16,34,0.8)",
-                  "rgba(25,16,34,1)",
-                ]}
-                className="absolute inset-0"
-              />
-            </View>
-          ) : (
-            <View
-              style={{ aspectRatio: 4 / 5 }}
-              className="w-full bg-gray-800 items-center justify-center"
-            >
-              <Ionicons name="image-outline" size={64} color="#444" />
-            </View>
-          )}
+          {(() => {
+            const mediaList = [];
+            
+            // Only prepend flyer_url if it isn't already in party_media
+            // (older parties stored the flyer directly in party_media, so
+            //  blindly prepending it caused it to appear twice or as a
+            //  blank black slide before the actual first video).
+            const existingUrls = new Set(
+              (party.media || []).map((m) => m.media_url)
+            );
+            const flyerIsAlreadyInMedia =
+              party.flyer_url && existingUrls.has(party.flyer_url);
+
+            if (
+              party.flyer_url &&
+              !flyerIsAlreadyInMedia &&
+              (party.flyer_url.startsWith("http") ||
+                party.flyer_url.startsWith("https"))
+            ) {
+               mediaList.push({
+                 id: "flyer_id",
+                 media_type: "image" as "image" | "video",
+                 media_url: party.flyer_url,
+                 is_primary: true,
+                 display_order: -1
+               });
+            }
+            
+            if (party.media && party.media.length > 0) {
+               mediaList.push(...party.media);
+            }
+
+            if (mediaList.length > 0) {
+              return (
+                <MediaGalleryViewer
+                  media={mediaList}
+                  showDelete={isEditing}
+                  onDelete={handleDeleteMedia}
+                  onReorder={isEditing ? handleReorderMedia : undefined}
+                  isActive={isFocused}
+                />
+              );
+            } else {
+              return (
+                <View
+                  style={{ aspectRatio: 4 / 5 }}
+                  className="w-full bg-gray-800 items-center justify-center"
+                >
+                  <Ionicons name="image-outline" size={64} color="#444" />
+                </View>
+              );
+            }
+          })()}
 
           {isEditing && (
             <TouchableOpacity
@@ -1499,22 +1571,79 @@ export default function PartyDetailScreen() {
               <View className="w-full bg-white/5 p-3 rounded-xl border border-white/10">
                 <Text className="text-gray-400 text-xs mb-1">Dress Code</Text>
                 <TextInput
-                  className="text-white font-semibold bg-white/5 p-1 rounded"
+                  className="text-white text-sm"
                   value={editedDressCode}
                   onChangeText={setEditedDressCode}
-                  placeholder="e.g., Smart Casual"
+                  placeholder="e.g. All Black, Casual..."
                   placeholderTextColor="#666"
                 />
               </View>
-            ) : (
-              party.dress_code && (
-                <View className="w-full bg-white/5 p-3 rounded-xl border border-white/10">
-                  <Text className="text-gray-400 text-xs mb-1">Dress Code</Text>
-                  <Text className="text-white font-semibold">
-                    {party.dress_code}
-                  </Text>
+            ) : party.dress_code ? (
+              <View className="bg-white/5 px-4 py-2 rounded-full border border-white/10 flex-row items-center">
+                <Ionicons name="shirt-outline" size={16} color="#9ca3af" />
+                <Text className="text-gray-300 text-sm ml-2">
+                  {party.dress_code}
+                </Text>
+              </View>
+            ) : null}
+
+            {/* Community Link Edit (Only visible when editing) */}
+            {isEditing && (
+              <View className="w-full bg-white/5 p-4 rounded-xl border border-white/10 mt-2">
+                <View className="mb-3 flex flex-row items-center">
+                  <Ionicons name="logo-whatsapp" size={20} color="#8B5CF6" />
+                  <View className="ml-2 flex-1">
+                    <Text className="text-white text-sm font-semibold">
+                      Community Group
+                    </Text>
+                    <Text className="text-gray-400 text-[10px]">
+                      Only visible to ticket holders
+                    </Text>
+                  </View>
                 </View>
-              )
+                <View className="flex-row flex-wrap items-center gap-2 mb-3">
+                  {['whatsapp', 'telegram', 'snapchat', 'discord', 'other'].map((platform) => (
+                    <TouchableOpacity
+                      key={platform}
+                      onPress={() => setEditedCommunityPlatform(platform)}
+                      className={`px-3 py-1.5 rounded-full border ${
+                        editedCommunityPlatform === platform
+                          ? "bg-purple-600 border-purple-500"
+                          : "bg-white/5 border-white/10"
+                      }`}
+                    >
+                      <Text className="text-white text-xs capitalize">{platform}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <TextInput
+                  className="text-white bg-black/20 p-3 rounded-lg border border-white/5"
+                  value={editedCommunityLink}
+                  onChangeText={setEditedCommunityLink}
+                  placeholder="https://chat.whatsapp.com/..."
+                  placeholderTextColor="#666"
+                  autoCapitalize="none"
+                />
+              </View>
+            )}
+
+            {/* Community Link View (Only visible to ticket holders) */}
+            {!isEditing && party.has_ticket && party.community_link && (
+              <View className="w-full bg-purple-600/10 p-4 rounded-xl border border-purple-500/30 mt-2 flex-row justify-between items-center">
+                <View className="flex-row items-center flex-1">
+                  <Ionicons name={`logo-${(party.community_platform || 'whatsapp').toLowerCase()}` as any} size={24} color="#8B5CF6" />
+                  <View className="ml-3">
+                    <Text className="text-white font-semibold">Join the Community</Text>
+                    <Text className="text-gray-400 text-xs">Connect with other attendees</Text>
+                  </View>
+                </View>
+                <TouchableOpacity 
+                  onPress={() => Linking.openURL(party.community_link!)}
+                  className="bg-purple-600 px-4 py-2 rounded-full"
+                >
+                  <Text className="text-white text-xs font-bold">Join</Text>
+                </TouchableOpacity>
+              </View>
             )}
           </View>
 

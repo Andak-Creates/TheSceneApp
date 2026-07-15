@@ -14,7 +14,10 @@
     },
     "preview": {
       "distribution": "internal",
-      "channel": "preview"
+      "channel": "production",
+      "env": {
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
+      }
     },
     "production": {
       "autoIncrement": true,
@@ -28,6 +31,11 @@
     "production": {
       "android": {
         "track": "internal"
+      }
+    },
+    "closed": {
+      "android": {
+        "track": "alpha"
       }
     }
   }

@@ -10,6 +10,8 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import DraggableFlatList, { RenderItemParams, ScaleDecorator } from "react-native-draggable-flatlist";
 import { pickImages, pickVideo } from "../lib/media";
 import { getOptimizedUrl } from "../lib/cloudinary";
 
@@ -132,16 +134,78 @@ export default function MediaGalleryUploader({
     onMediaChange(updated);
   };
 
-  const handleReorder = (fromIndex: number, toIndex: number) => {
-    const updated = [...media];
-    const [moved] = updated.splice(fromIndex, 1);
-    updated.splice(toIndex, 0, moved);
-    // Update order
-    updated.forEach((item, i) => {
-      item.order = i;
-    });
+  const handleDragEnd = ({ data }: { data: MediaItem[] }) => {
+    const updated = data.map((item, index) => ({
+      ...item,
+      order: index,
+    }));
     setMedia(updated);
     onMediaChange(updated);
+  };
+
+  const renderItem = ({ item, drag, isActive, getIndex }: RenderItemParams<MediaItem>) => {
+    const index = getIndex() || 0;
+    return (
+      <ScaleDecorator>
+        <TouchableOpacity
+          onLongPress={drag}
+          disabled={isActive}
+          activeOpacity={0.8}
+          className="mr-3 relative"
+        >
+          <Image
+            source={{ uri: getOptimizedUrl(item.thumbnailUri || item.uri, item.type) }}
+            className={`w-32 h-32 rounded-xl ${isActive ? "border-2 border-purple-500 opacity-80" : ""}`}
+          />
+
+          {/* Primary Badge */}
+          {item.isPrimary && (
+            <View className="absolute top-2 left-2 bg-purple-600 px-2 py-1 rounded-full">
+              <Text className="text-white text-xs font-bold">Primary</Text>
+            </View>
+          )}
+
+          {/* Video Badge */}
+          {item.type === "video" && (
+            <View className="absolute inset-0 items-center justify-center pointer-events-none">
+              <View className="bg-black/50 rounded-full p-2">
+                <Ionicons name="play" size={24} color="#fff" />
+              </View>
+            </View>
+          )}
+
+          {/* Actions */}
+          <View className="absolute top-2 right-2 flex-row gap-1">
+            {!item.isPrimary && item.type === "image" && (
+              <TouchableOpacity
+                onPress={() => handleSetPrimary(index)}
+                className="bg-black/70 rounded-full p-1"
+              >
+                <Ionicons name="star-outline" size={16} color="#fff" />
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              onPress={() => handleRemove(index)}
+              className="bg-red-600/90 rounded-full p-1"
+            >
+              <Ionicons name="close" size={16} color="#fff" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Drag Handle Overlay Instruction */}
+          <View className="absolute bottom-2 right-2 bg-black/60 rounded-full p-1">
+             <Ionicons name="menu" size={16} color="#fff" />
+          </View>
+
+          {/* Uploading Indicator */}
+          {item.uploading && (
+            <View className="absolute inset-0 bg-black/50 items-center justify-center rounded-xl">
+              <ActivityIndicator size="small" color="#fff" />
+            </View>
+          )}
+        </TouchableOpacity>
+      </ScaleDecorator>
+    );
   };
 
   return (
@@ -152,77 +216,17 @@ export default function MediaGalleryUploader({
 
       {/* Media Grid */}
       {media.length > 0 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          className="mb-4"
-        >
-          {media.map((item, index) => (
-            <View key={index} className="mr-3 relative">
-              <Image
-                source={{ uri: getOptimizedUrl(item.thumbnailUri || item.uri, item.type) }}
-                className="w-32 h-32 rounded-xl"
-              />
-
-              {/* Primary Badge */}
-              {item.isPrimary && (
-                <View className="absolute top-2 left-2 bg-purple-600 px-2 py-1 rounded-full">
-                  <Text className="text-white text-xs font-bold">Primary</Text>
-                </View>
-              )}
-
-              {/* Video Badge */}
-              {item.type === "video" && (
-                <View className="absolute inset-0 items-center justify-center">
-                  <View className="bg-black/50 rounded-full p-2">
-                    <Ionicons name="play" size={24} color="#fff" />
-                  </View>
-                </View>
-              )}
-
-              {/* Actions */}
-              <View className="absolute top-2 right-2 flex-row gap-1">
-                {index > 0 && (
-                  <TouchableOpacity
-                    onPress={() => handleReorder(index, index - 1)}
-                    className="bg-black/70 rounded-full p-1"
-                  >
-                    <Ionicons name="chevron-back" size={16} color="#fff" />
-                  </TouchableOpacity>
-                )}
-                {index < media.length - 1 && (
-                  <TouchableOpacity
-                    onPress={() => handleReorder(index, index + 1)}
-                    className="bg-black/70 rounded-full p-1"
-                  >
-                    <Ionicons name="chevron-forward" size={16} color="#fff" />
-                  </TouchableOpacity>
-                )}
-                {!item.isPrimary && item.type === "image" && (
-                  <TouchableOpacity
-                    onPress={() => handleSetPrimary(index)}
-                    className="bg-black/70 rounded-full p-1"
-                  >
-                    <Ionicons name="star-outline" size={16} color="#fff" />
-                  </TouchableOpacity>
-                )}
-                <TouchableOpacity
-                  onPress={() => handleRemove(index)}
-                  className="bg-red-600/90 rounded-full p-1"
-                >
-                  <Ionicons name="close" size={16} color="#fff" />
-                </TouchableOpacity>
-              </View>
-
-              {/* Uploading Indicator */}
-              {item.uploading && (
-                <View className="absolute inset-0 bg-black/50 items-center justify-center rounded-xl">
-                  <ActivityIndicator size="small" color="#fff" />
-                </View>
-              )}
-            </View>
-          ))}
-        </ScrollView>
+        <GestureHandlerRootView className="mb-4">
+          <DraggableFlatList
+            horizontal
+            data={media}
+            onDragEnd={handleDragEnd}
+            keyExtractor={(item) => item.uri}
+            renderItem={renderItem}
+            showsHorizontalScrollIndicator={false}
+            containerStyle={{ overflow: 'visible' }}
+          />
+        </GestureHandlerRootView>
       )}
 
       {/* Add Buttons */}

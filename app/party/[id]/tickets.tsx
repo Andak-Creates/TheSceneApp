@@ -6,16 +6,18 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Linking,
+  Modal,
   ScrollView,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
 import { PaystackProvider, usePaystack } from "react-native-paystack-webview";
-
-const PAYSTACK_PUBLIC_KEY = process.env.EXPO_PUBLIC_PAYSTACK_PUBLIC_KEY ?? '';
 import { supabase } from "../../../lib/supabase";
 import { useAuthStore } from "../../../stores/authStore";
+
+const PAYSTACK_PUBLIC_KEY = process.env.EXPO_PUBLIC_PAYSTACK_PUBLIC_KEY ?? "";
 
 interface Party {
   id: string;
@@ -39,6 +41,8 @@ interface Party {
     is_primary: boolean;
   }[];
   show_ticket_count?: boolean;
+  community_link?: string | null;
+  community_platform?: string | null;
 }
 
 interface TicketTier {
@@ -58,14 +62,23 @@ const APP_FEE_PERCENTAGE = 0.05;
 const PAYSTACK_CURRENCIES = ["NGN", "GHS", "USD", "ZAR", "KES", "XOF"];
 
 export default function TicketPurchaseScreen() {
+  const [channels, setChannels] = useState<any[]>(["card", "bank_transfer"]);
+
   return (
-    <PaystackProvider publicKey={PAYSTACK_PUBLIC_KEY}>
-      <InnerTicketPurchaseScreen />
+    <PaystackProvider
+      publicKey={PAYSTACK_PUBLIC_KEY}
+      defaultChannels={channels}
+    >
+      <InnerTicketPurchaseScreen setChannels={setChannels} />
     </PaystackProvider>
   );
 }
 
-function InnerTicketPurchaseScreen() {
+function InnerTicketPurchaseScreen({
+  setChannels,
+}: {
+  setChannels: (c: any[]) => void;
+}) {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { user } = useAuthStore();
@@ -78,6 +91,7 @@ function InnerTicketPurchaseScreen() {
   const [quantity, setQuantity] = useState(1);
   const [loading, setLoading] = useState(true);
   const [purchasing, setPurchasing] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
 
   // Inside the component:
   const { setFeedActive } = useAudioStore();
@@ -157,7 +171,7 @@ function InnerTicketPurchaseScreen() {
     }
   };
 
-  const handlePurchase = async () => {
+  const handleInitiatePurchase = () => {
     if (!user || !selectedTier || !party) return;
 
     const tier = ticketTiers.find((t) => t.id === selectedTier);
@@ -175,6 +189,25 @@ function InnerTicketPurchaseScreen() {
       );
       return;
     }
+
+    const ticketPrice = tier.price * quantity;
+    const appFee = ticketPrice * APP_FEE_PERCENTAGE;
+    const totalPrice = ticketPrice + appFee;
+
+    // Handle Free Tickets (0 Naira/Currency)
+    if (totalPrice === 0) {
+      handlePurchase("free");
+      return;
+    }
+
+    setShowPaymentModal(true);
+  };
+
+  const handlePurchase = async (channel: string) => {
+    if (!user || !selectedTier || !party) return;
+
+    const tier = ticketTiers.find((t) => t.id === selectedTier);
+    if (!tier) return;
 
     const ticketPrice = tier.price * quantity;
     const appFee = ticketPrice * APP_FEE_PERCENTAGE;
@@ -201,6 +234,7 @@ function InnerTicketPurchaseScreen() {
       totalPrice,
     };
 
+    setShowPaymentModal(false);
     setPurchasing(true);
 
     const amountInSmallestUnit = totalPrice;
@@ -248,8 +282,8 @@ function InnerTicketPurchaseScreen() {
         email: user.email || "",
         amount: amountInSmallestUnit,
         currency: paystackCurrency,
+        channels: ["card", "bank_transfer"],
         reference: `TK_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
-        channels: ["card", "bank_transfer", "ussd", "mobile_money", "bank"],
         metadata: {
           party_id: partyId,
           party_title: party.title,
@@ -280,7 +314,7 @@ function InnerTicketPurchaseScreen() {
         },
         onCancel: async () => {
           // Release the pre-reserved capacity since user cancelled
-          await supabase.rpc('release_tickets_atomic', {
+          await supabase.rpc("release_tickets_atomic", {
             p_tier_id: selectedTier,
             p_quantity: quantity,
           });
@@ -290,7 +324,7 @@ function InnerTicketPurchaseScreen() {
         },
         onError: async (error: any) => {
           // Release the pre-reserved capacity since payment failed
-          await supabase.rpc('release_tickets_atomic', {
+          await supabase.rpc("release_tickets_atomic", {
             p_tier_id: selectedTier,
             p_quantity: quantity,
           });
@@ -308,7 +342,7 @@ function InnerTicketPurchaseScreen() {
       } as any);
     } catch (error) {
       // Release pre-reserved capacity if popup itself fails to open
-      await supabase.rpc('release_tickets_atomic', {
+      await supabase.rpc("release_tickets_atomic", {
         p_tier_id: selectedTier,
         p_quantity: quantity,
       });
@@ -348,7 +382,7 @@ function InnerTicketPurchaseScreen() {
 
       if (ticketError) {
         // Compensate — release the capacity we reserved since the insert failed
-        await supabase.rpc('release_tickets_atomic', {
+        await supabase.rpc("release_tickets_atomic", {
           p_tier_id: purchase.tierId,
           p_quantity: purchase.quantity,
         });
@@ -377,17 +411,38 @@ function InnerTicketPurchaseScreen() {
       pendingPurchase.current = null;
       await fetchPartyAndTickets();
 
-      Alert.alert(
-        "🎉 You're in!",
-        `${purchase.quantity} × ${purchase.tierName} ticket${purchase.quantity > 1 ? "s" : ""} for ${party.title}`,
-        [
-          {
-            text: "View My Tickets",
-            onPress: () => router.push("/my-tickets"),
-          },
-          { text: "Done", onPress: () => router.back() },
-        ],
-      );
+      if (party.community_link) {
+        Alert.alert(
+          "🎉 You're in!",
+          `${purchase.quantity} × ${purchase.tierName} ticket${purchase.quantity > 1 ? "s" : ""} for ${party.title}\n\nThe host has a community group for this party. Would you like to join it now?`,
+          [
+            {
+              text: "Join Group",
+              onPress: () => {
+                Linking.openURL(party.community_link!);
+                router.push("/my-tickets");
+              },
+            },
+            {
+              text: "Maybe Later",
+              onPress: () => router.push("/my-tickets"),
+            },
+            { text: "Done", onPress: () => router.back() },
+          ],
+        );
+      } else {
+        Alert.alert(
+          "🎉 You're in!",
+          `${purchase.quantity} × ${purchase.tierName} ticket${purchase.quantity > 1 ? "s" : ""} for ${party.title}`,
+          [
+            {
+              text: "View My Tickets",
+              onPress: () => router.push("/my-tickets"),
+            },
+            { text: "Done", onPress: () => router.back() },
+          ],
+        );
+      }
     } catch (error: any) {
       console.error("Ticket creation error:", error);
       const isFree = purchase.totalPrice === 0;
@@ -600,13 +655,18 @@ function InnerTicketPurchaseScreen() {
                 </Text>
               </View>
               {tier.available === 0 ? (
-                <Text className="text-red-400 text-sm font-semibold">Sold Out</Text>
+                <Text className="text-red-400 text-sm font-semibold">
+                  Sold Out
+                </Text>
               ) : party?.show_ticket_count ? (
                 <Text className="text-gray-400 text-sm">
-                  {tier.available} ticket{tier.available !== 1 ? "s" : ""} available
+                  {tier.available} ticket{tier.available !== 1 ? "s" : ""}{" "}
+                  available
                 </Text>
               ) : (
-                <Text className="text-gray-400 text-sm font-semibold">Available</Text>
+                <Text className="text-gray-400 text-sm font-semibold">
+                  Available
+                </Text>
               )}
             </TouchableOpacity>
           ))}
@@ -652,8 +712,10 @@ function InnerTicketPurchaseScreen() {
                   className="w-10 h-10 rounded-full bg-white/10 items-center justify-center"
                   disabled={
                     quantity >= selectedTierData.available ||
-                    !!(selectedTierData.max_per_order &&
-                      quantity >= selectedTierData.max_per_order)
+                    !!(
+                      selectedTierData.max_per_order &&
+                      quantity >= selectedTierData.max_per_order
+                    )
                   }
                 >
                   <Ionicons
@@ -723,7 +785,7 @@ function InnerTicketPurchaseScreen() {
       {/* Fixed Purchase Button */}
       <View className="absolute bottom-0 left-0 right-0 px-6 py-6 border-t border-white/10 bg-[#191022]">
         <TouchableOpacity
-          onPress={handlePurchase}
+          onPress={handleInitiatePurchase}
           disabled={
             purchasing ||
             !selectedTier ||
@@ -764,6 +826,75 @@ function InnerTicketPurchaseScreen() {
           Secured by Paystack • By purchasing you agree to our Terms
         </Text>
       </View>
+
+      {/* Payment Method Modal */}
+      <Modal
+        visible={showPaymentModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowPaymentModal(false)}
+      >
+        <View className="flex-1 justify-end bg-black/60">
+          <View className="bg-[#191022] rounded-t-3xl p-6 min-h-[40%] border-t border-white/10">
+            <View className="flex-row justify-between items-center mb-6">
+              <Text className="text-white text-xl font-bold">
+                Select Payment Method
+              </Text>
+              <TouchableOpacity onPress={() => setShowPaymentModal(false)}>
+                <Ionicons name="close-circle" size={28} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            <Text className="text-gray-400 mb-4">
+              How would you like to pay {currencySymbol}
+              {total.toLocaleString(undefined, {
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 2,
+              })}
+              ?
+            </Text>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {[
+                {
+                  id: "card",
+                  title: "Debit / Credit Card",
+                  icon: "card-outline",
+                },
+                {
+                  id: "bank_transfer",
+                  title: "Bank Transfer",
+                  icon: "swap-horizontal-outline",
+                },
+              ].map((method) => (
+                <TouchableOpacity
+                  key={method.id}
+                  onPress={() => {
+                    setChannels([method.id]);
+                    // Tiny delay to ensure state batches and updates context properly
+                    setTimeout(() => {
+                      handlePurchase(method.id);
+                    }, 50);
+                  }}
+                  className="flex-row items-center bg-white/5 border border-white/10 p-4 rounded-2xl mb-3"
+                >
+                  <View className="w-10 h-10 rounded-full bg-purple-600/20 items-center justify-center mr-4">
+                    <Ionicons
+                      name={method.icon as any}
+                      size={20}
+                      color="#a78bfa"
+                    />
+                  </View>
+                  <Text className="text-white font-semibold text-base flex-1">
+                    {method.title}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={20} color="#666" />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
